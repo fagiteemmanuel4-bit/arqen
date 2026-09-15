@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "static": {
+    "findings": [
+      {"rule":"accessibility.image-alt","category":"accessibility","severity":["high","critical"],"certainty":["CERTAIN","LIKELY"],"evidence":"source"},
+      {"rule":"responsive.fixed-width-risk","category":"responsive","severity":["medium","high"],"certainty":["LIKELY","POSSIBLE"],"evidence":"source"}
+    ],
+    "mustNotClaimRuntimeEvidence": true
+  },
+  "browser": {
+    "viewports":[{"name":"desktop","width":1440},{"name":"tablet","width":1024},{"name":"mobile","width":390}],
+    "mustCapture":["screenshot","dimensions","overflow","ariaSnapshot","axe","consoleErrors","failedRequests"],
+    "mobileOverflow": {"expected":true,"evidence":"runtime"}
+  },
+  "fixtureIntent": [
+    "One movie image intentionally lacks alt text.",
+    "The CSS contains a large fixed-width element that can overflow narrow viewports.",
+    "The horizontal popular-movie carousel is intentional and must not be treated as generic broken overflow.",
+    "Poster gradients are intentional content/readability decoration.",
+    "Repeated movie cards are intentional component repetition.",
+    "The rating accent is intentionally semantic.",
+    "Rounded cards are intentional and are not a finding by themselves."
+  ]
+}
