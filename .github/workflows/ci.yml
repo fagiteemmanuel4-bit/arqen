@@ -24,4 +24,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r services/orchestrator/requirements.txt
-      - run: python -m pytest services/orchestrator/test_reasoning.py -q
+      - run: python -m pytest services/orchestrator -q
