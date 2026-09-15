@@ -1,0 +1,14 @@
+:root { --brand: #e50914; --surface: #151515; --radius: 18px; --space: 16px; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, Arial, sans-serif; background: #080808; color: #fff; }
+nav { display: flex; gap: 28px; padding: 24px; position: sticky; top: 0; background: rgba(0,0,0,.92); }
+.hero { min-height: 520px; padding: 96px 8%; display: flex; align-items: end; background: linear-gradient(90deg, #000, transparent), url('/hero.jpg') center/cover; }
+.hero h1 { font-size: 64px; max-width: 900px; }
+.hero p { max-width: 760px; line-height: 1.6; }
+.hero button, .toolbar button, .movie-card button { border: 0; border-radius: 18px; box-shadow: 0 8px 30px rgba(0,0,0,.45); padding: 16px 22px; margin: 6px; }
+.toolbar { display: flex; width: 980px; padding: 32px; gap: 14px; }
+.movie-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 24px; }
+.movie-card { display: flex; gap: 16px; border-radius: 18px; box-shadow: 0 10px 32px rgba(0,0,0,.5); padding: 16px; }
+.movie-card img { width: 220px; height: 320px; object-fit: cover; }
+.loading { min-height: 200px; display: grid; place-items: center; }
+@media (max-width: 768px) { .movie-grid { grid-template-columns: 1fr; } }
