@@ -1,4 +1,3 @@
-:root { --brand: #e50914; --surface: #151515; --radius: 18px; --space: 16px; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Inter, Arial, sans-serif; background: #080808; color: #fff; }
 main { min-width: 0; }
