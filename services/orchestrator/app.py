@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from providers import ProviderError, provider_from_env
-from reasoning import RECOMMENDATION_SCHEMA, SYSTEM_PROMPT as REASONING_SYSTEM_PROMPT, RecommendationRequest, build_reasoning_prompt
+from reasoning import RECOMMENDATION_SCHEMA, SYSTEM_PROMPT as REASONING_SYSTEM_PROMPT, RecommendationRequest, build_reasoning_prompt, normalize_recommendations
+from validation import ArtifactValidationError, validate_artifact
 
 load_dotenv()
 
@@ -53,9 +54,10 @@ def health() -> dict[str, str]:
 async def design(request: DesignRequest) -> dict[str, Any]:
     try:
         provider = provider_from_env()
-        result = await provider.generate_json(system=DESIGN_SYSTEM_PROMPT, user=request.prompt, schema=UIIR_SCHEMA)
+        raw = await provider.generate_json(system=DESIGN_SYSTEM_PROMPT, user=request.prompt, schema=UIIR_SCHEMA)
+        result = validate_artifact(json.dumps(raw, ensure_ascii=False), UIIR_SCHEMA, provider_name=provider.name)
         return {"uiir": result, "provider": provider.name, "model": provider.model}
-    except ProviderError as exc:
+    except (ProviderError, ArtifactValidationError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -63,14 +65,21 @@ async def design(request: DesignRequest) -> dict[str, Any]:
 async def recommend(request: RecommendationRequest) -> dict[str, Any]:
     try:
         provider = provider_from_env()
-        result = await provider.generate_json(
+        raw = await provider.generate_json(
             system=REASONING_SYSTEM_PROMPT,
             user=build_reasoning_prompt(request),
             schema=RECOMMENDATION_SCHEMA,
         )
+        artifact = validate_artifact(json.dumps(raw, ensure_ascii=False), RECOMMENDATION_SCHEMA, provider_name=provider.name)
+        try:
+            result = normalize_recommendations(artifact, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"recommendations": result, "provider": provider.name, "model": provider.model}
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ArtifactValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/build")
