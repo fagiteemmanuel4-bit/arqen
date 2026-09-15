@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page } from "playwright";
-import AxeBuilder from "@axe-core/playwright";
+import { AxeBuilder } from "@axe-core/playwright";
 
 export const DEFAULT_VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -64,7 +64,7 @@ async function inspectPage(page: Page, target: string, name: BrowserViewportName
     return { selector: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}${element.className && typeof element.className === "string" ? `.${element.className.trim().split(/\\s+/).slice(0, 2).join(".")}` : ""}`, tag: element.tagName.toLowerCase(), x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
   }));
   const dimensions = await page.evaluate(() => ({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight }));
-  const ariaSnapshot = await page.locator("body").ariaSnapshot({ ref: true });
+  const ariaSnapshot = await page.locator("body").ariaSnapshot({ mode: "default" });
   const axe = await new AxeBuilder({ page }).analyze();
   const screenshotPath = path.join(outputDir, `${name}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
