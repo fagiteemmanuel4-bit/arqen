@@ -107,20 +107,23 @@ function parseComponents(root: string, files: string[]): Component[] {
       if (isComponentName(name)) components.push(componentFromFunction(root, file, source, name, node, kind, exported));
     };
     const visit = (node: ts.Node) => {
-      if (ts.isFunctionDeclaration(node) && node.name) addFunction(node.name.text, node, "function", hasExportModifier(node));
+      if (ts.isFunctionDeclaration(node)) {
+        if (node.name) addFunction(node.name.text, node, "function", hasExportModifier(node));
+        else if (node.parent && ts.isSourceFile(node.parent) && node.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) addFunction("default", node, "function", true);
+      }
+      if (ts.isClassDeclaration(node) && node.name && isComponentName(node.name.text)) {
+        const heritage = node.heritageClauses?.some((clause) => /(?:React\.)?Component|PureComponent/.test(clause.getText(source))) ?? false;
+        if (heritage) components.push({ id: `${path.relative(root, file)}:${node.name.text}`, name: node.name.text, file: path.relative(root, file), kind: "class", exported: hasExportModifier(node), jsxElements: jsxElementsFor(node, source), props: [], sourceLines: source.text.slice(0, node.end).split("\n").length });
+      }
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
         const name = node.name.text;
         const initializer = node.initializer ? unwrapExpression(node.initializer) : undefined;
         if (initializer && isFunctionLike(initializer)) addFunction(name, initializer, "function", hasExportModifier(node.parent.parent));
         else if (initializer && ts.isCallExpression(initializer) && initializer.arguments.length > 0) {
-          const callee = initializer.expression.getText(source);
           const wrapped = initializer.arguments.find((argument) => isFunctionLike(unwrapExpression(argument)));
           if (wrapped) {
             const expression = unwrapExpression(wrapped);
             if (isFunctionLike(expression)) addFunction(name, expression, "function", hasExportModifier(node.parent.parent));
-            if (/^[A-Z]/.test(name) && /(?:memo|forwardRef|observer|with[A-Z]|connect|styled)/.test(callee)) {
-              // The wrapper is recorded through the same component model; the callee is visible in jsxElements only when rendered.
-            }
           }
         }
       }
@@ -129,7 +132,10 @@ function parseComponents(root: string, files: string[]): Component[] {
         if (isFunctionLike(expression)) addFunction("default", expression, "function", true);
         else if (ts.isCallExpression(expression)) {
           const wrapped = expression.arguments.find((argument) => isFunctionLike(unwrapExpression(argument)));
-          if (wrapped) addFunction("default", unwrapExpression(wrapped) as ts.ArrowFunction | ts.FunctionExpression, "function", true);
+          if (wrapped) {
+            const inner = unwrapExpression(wrapped);
+            if (isFunctionLike(inner)) addFunction("default", inner, "function", true);
+          }
         }
       }
       ts.forEachChild(node, visit);
@@ -149,18 +155,19 @@ function tokenCategory(name: string, value: string): DesignSystem["tokens"][numb
   return "other";
 }
 
-function extractDesignSystem(files: string[]): DesignSystem {
+function extractDesignSystem(root: string, files: string[]): DesignSystem {
   const tokens: DesignSystem["tokens"] = [];
   const valueCounts = new Map<string, { category: DesignSystem["tokens"][number]["category"]; count: number }>();
   const componentCounts = new Map<string, { count: number; files: Set<string> }>();
   for (const file of files.filter((item) => /\.(css|scss|sass|tsx|jsx|ts|js)$/.test(item))) {
     const text = fs.readFileSync(file, "utf8");
+    const relative = path.relative(root, file).replaceAll(path.sep, "/");
     if (/\.(css|scss|sass)$/.test(file)) {
       for (const match of text.matchAll(/--([a-zA-Z0-9_-]+)\s*:\s*([^;]+);/g)) {
         const name = `--${match[1]}`;
         const value = match[2].trim();
         const category = tokenCategory(name, value);
-        tokens.push({ name, category, value, source: path.basename(file) });
+        tokens.push({ name, category, value, source: relative });
         const current = valueCounts.get(value) ?? { category, count: 0 };
         current.count += 1;
         valueCounts.set(value, current);
@@ -178,7 +185,7 @@ function extractDesignSystem(files: string[]): DesignSystem {
       const name = match[1];
       const current = componentCounts.get(name) ?? { count: 0, files: new Set<string>() };
       current.count += 1;
-      current.files.add(path.relative(path.dirname(file), file));
+      current.files.add(relative);
       componentCounts.set(name, current);
     }
   }
@@ -199,7 +206,7 @@ export function analyzeProject(root: string): Project {
   const language: Project["language"] = files.some((file) => file.extension === ".tsx" || file.extension === ".ts") && files.some((file) => file.extension === ".jsx" || file.extension === ".js") ? "mixed" : files.some((file) => /\.tsx?$/.test(file.extension)) ? "typescript" : files.some((file) => /\.jsx?$/.test(file.extension)) ? "javascript" : "unknown";
   const framework = detectFramework(resolvedRoot, packageJson);
   const components = parseComponents(resolvedRoot, rawFiles);
-  const designSystem = extractDesignSystem(rawFiles);
+  const designSystem = extractDesignSystem(resolvedRoot, rawFiles);
   const routes = rawFiles.filter((file) => /(^|\/)(page|route)\.(tsx|ts|jsx|js)$/.test(file) || /pages\/.*\.(tsx|ts|jsx|js)$/.test(file)).map((file) => ({ path: routeForFile(resolvedRoot, file), file: path.relative(resolvedRoot, file), kind: /route\./.test(file) ? "api" as const : "page" as const }));
   const pkgName = typeof packageJson?.name === "string" ? packageJson.name : path.basename(resolvedRoot);
   return { root: resolvedRoot, name: pkgName, framework, language, packageManager: detectPackageManager(resolvedRoot), styling: detectStyling(resolvedRoot, rawFiles), files, entryPoints: findEntryPoints(resolvedRoot, rawFiles), routes, components, designSystem };
