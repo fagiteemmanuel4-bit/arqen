@@ -61,7 +61,7 @@ export function auditProject(project: Project): AuditResult {
   const responsive = (allSource.match(/(?:sm|md|lg|xl):/g) ?? []).length + (allSource.match(/@media\s*\(/g) ?? []).length + (allSource.match(/@container\s*\(/g) ?? []).length;
   if (project.framework !== "unknown" && responsive < 3 && project.files.length > 5) add(findings, { category: "responsive", severity: "high", confidence: 0.58, certainty: "POSSIBLE", risk: "high", title: "Limited explicit responsive behavior", evidence: `Only ${responsive} responsive utility, media-query or container-query signals were found. This is a signal, not proof that responsive behavior is missing.`, recommendation: "Verify mobile and tablet layouts. Add analyzer adapters for other responsive mechanisms when present.", files: relativeFiles(project), rule: "responsive.low-signal" });
 
-  const fixedWidths = [...allSource.matchAll(/(?:width|min-width|max-width)\s*:\s*(\d{3,4})px/g)].map((match) => Number(match[1])).filter((value) => value >= 320);
+  const fixedWidths = [...allSource.matchAll(/(?:width|min-width|max-width)\s*:\s*(\d{3,4})px/g)].map((match) => Number(match[1] ?? 0)).filter((value) => value >= 320);
   const wideTailwind = (allSource.match(/(?:w|w-min|w-max)-\[(\d{3,4})px\]/g) ?? []).length;
   if (fixedWidths.length + wideTailwind >= 2) add(findings, { category: "responsive", severity: "medium", confidence: 0.83, certainty: "LIKELY", risk: "medium", title: "Potential fixed-width mobile overflow", evidence: `${fixedWidths.length + wideTailwind} large fixed-width declarations were detected. Static analysis cannot observe actual viewport overflow.`, recommendation: "Prefer fluid widths with max-width constraints and verify at narrow viewports.", potentialFix: "Replace only layout-critical fixed widths after checking intended desktop constraints.", files: relativeFiles(project), rule: "responsive.fixed-width-risk" });
 
@@ -78,18 +78,18 @@ export function auditProject(project: Project): AuditResult {
   if (controls > labels) add(findings, { category: "accessibility", severity: "high", confidence: 0.86, certainty: "LIKELY", risk: "high", title: "Form controls may lack accessible names", evidence: `${controls} form controls and ${labels} explicit label/name signals were detected.`, recommendation: "Ensure every interactive form control has an accessible name through a label, aria-label, or aria-labelledby.", files: relativeFiles(project), rule: "accessibility.form-names" });
 
   const buttonBlocks = [...allSource.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)];
-  const unnamedButtons = buttonBlocks.filter((match) => !/aria-label\s*=|aria-labelledby\s*=/.test(match[1]) && !match[2].replace(/<[^>]+>/g, "").trim()).length;
+  const unnamedButtons = buttonBlocks.filter((match) => !/aria-label\s*=|aria-labelledby\s*=/.test(match[1] ?? "") && !((match[2] ?? "").replace(/<[^>]+>/g, "").trim())).length;
   if (unnamedButtons > 0) add(findings, { category: "accessibility", severity: "high", confidence: 0.96, certainty: "CERTAIN", risk: "high", title: "Buttons without an accessible name", evidence: `${unnamedButtons} button elements contain no detectable text or accessible-name attribute.`, recommendation: "Give icon-only and otherwise unlabeled buttons an accessible name.", files: relativeFiles(project), rule: "accessibility.button-names" });
 
   const focusSignals = (allSource.match(/:focus(?:-visible|-within)?\b/g) ?? []).length + (allSource.match(/focus(?:-visible)?:/g) ?? []).length + (allSource.match(/onFocus\s*=|onKeyDown\s*=/g) ?? []).length;
   const interactiveCount = (allSource.match(/<(?:button|a|input|select|textarea)\b/g) ?? []).length;
   if (interactiveCount >= 5 && focusSignals === 0) add(findings, { category: "accessibility", severity: "medium", confidence: 0.79, certainty: "LIKELY", risk: "medium", title: "No explicit keyboard-focus styling detected", evidence: `${interactiveCount} interactive elements were detected with no static focus-state signal.`, recommendation: "Provide visible focus indicators and verify keyboard navigation in the browser.", files: relativeFiles(project), rule: "accessibility.focus-state" });
 
-  const weakLinks = [...allSource.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)].filter((match) => /^(?:here|click here|learn more|read more|more)$/i.test(match[1].replace(/<[^>]+>/g, "").trim()));
+  const weakLinks = [...allSource.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)].filter((match) => /^(?:here|click here|learn more|read more|more)$/i.test((match[1] ?? "").replace(/<[^>]+>/g, "").trim()));
   if (weakLinks.length > 0) add(findings, { category: "accessibility", severity: "medium", confidence: 0.94, certainty: "CERTAIN", risk: "low", title: "Links use weak accessible names", evidence: `${weakLinks.length} link labels rely on generic phrases such as “learn more” or “click here”.`, recommendation: "Use link text that identifies the destination or action without relying on surrounding context.", files: relativeFiles(project), rule: "accessibility.weak-link-names" });
 
-  const headings = [...allSource.matchAll(/<h([1-6])\b/g)].map((match) => Number(match[1]));
-  const headingJump = headings.some((level, index) => index > 0 && level - headings[index - 1] > 1);
+  const headings = [...allSource.matchAll(/<h([1-6])\b/g)].map((match) => Number(match[1] ?? 1));
+  const headingJump = headings.some((level, index) => index > 0 && level - (headings[index - 1] ?? level) > 1);
   if (headingJump) add(findings, { category: "hierarchy", severity: "medium", confidence: 0.88, certainty: "CERTAIN", risk: "medium", title: "Heading hierarchy skips levels", evidence: `Heading sequence contains a jump larger than one level (${headings.join(" → ")}).`, recommendation: "Use heading levels to express document hierarchy rather than visual size alone.", files: relativeFiles(project), rule: "hierarchy.heading-levels" });
 
   const duplicatePatterns = project.designSystem.componentPatterns.filter((pattern) => pattern.count >= 3);
