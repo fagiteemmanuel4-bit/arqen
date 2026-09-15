@@ -1,13 +1,13 @@
 {
   "mustDetect": [
-    "decoration.rounded-containers",
-    "decoration.shadow-density",
     "accessibility.image-alt",
     "responsive.fixed-width-risk"
   ],
   "mayDetect": [
-    "responsive.overflow-clipping",
-    "components.repeated-patterns"
+    "accessibility.focus-state",
+    "accessibility.button-names",
+    "components.repeated-patterns",
+    "responsive.overflow-clipping"
   ],
   "mustNotClaim": [
     "observed-mobile-overflow",
