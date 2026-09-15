@@ -17,6 +17,7 @@ export default function App() {
     <section className="hero"><div><p>FEATURED</p><h1>Dune: Part Two</h1><p>Paul Atreides joins Chani and the Fremen while seeking revenge against the conspirators who destroyed his family.</p><button>Watch trailer</button><button>View details</button></div></section>
     <section className="toolbar"><label htmlFor="search">Search movies</label><input id="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" /><button>Search</button><button>Genres</button><button>Sort</button></section>
     <section><h2>Trending this week</h2><div className="movie-grid">{results.map((movie) => <MovieCard key={movie} title={movie} />)}</div>{results.length === 0 && <p>No movies found. Try another search.</p>}</section>
+    <section className="editor-picks"><h2>Editor's picks</h2><MovieCard title="Arrival" /><MovieCard title="Parasite" /></section>
     <section className="loading" aria-label="Loading movies"><p>Loading more movies…</p></section>
     <footer><a href="/about">About Cinebase</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
   </main>;
