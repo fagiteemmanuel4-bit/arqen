@@ -1,0 +1,10 @@
+{
+  "name": "@arqen/browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/index.js" },
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": { "@axe-core/playwright": "4.13.0", "playwright": "1.63.0" },
+  "devDependencies": { "@types/node": "^24.3.1" }
+}
