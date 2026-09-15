@@ -1,33 +1,45 @@
-# Security model
+# Security boundary
 
-ARQEN treats analyzed repositories as untrusted input.
+ARQEN treats analyzed repositories as hostile input. Source code, comments, package metadata, documentation and generated artifacts are data, not instructions.
 
 ## Current guarantees
 
-- project analysis is read-only
-- scanner ignores common dependency/build directories
-- transformation paths are resolved under the requested project root
-- transformations verify the exact source snapshot before writing
-- applied files receive a local `.arqen-backup` before mutation
-- dry-run is the default transformation mode
-- provider credentials are environment-only and excluded from frontend code
-- CORS origins are explicitly configured for the orchestrator
-- the orchestrator does not execute repository source or package scripts
+- static project analysis is read-only
+- model prompts explicitly delimit repository-derived data
+- provider responses are bounded before parsing
+- provider JSON is parsed and schema-validated before entering ARQEN's deterministic pipeline
+- UIIR is validated against the versioned canonical JSON Schema
+- provider failures are normalized to `ProviderError`
+- provider credentials remain in environment variables and are never returned as model context by the orchestrator
+- the orchestrator does not execute model-generated shell commands
 
-## Current limitations
+## Model output boundary
 
-The local CLI is intended to run with the same OS permissions as its user. It is not yet a sandbox. Do not point an untrusted multi-tenant service at arbitrary repositories.
+The trust boundary is:
 
-Before hosted execution, ARQEN needs:
+```text
+MODEL
+  ↓
+bounded text response
+  ↓
+JSON extraction
+  ↓
+JSON Schema validation
+  ↓
+normalized structured artifact
+  ↓
+ARQEN deterministic systems
+```
 
-1. isolated workspaces
-2. filesystem capability restrictions
-3. command allowlists and timeouts
-4. dependency/network isolation
-5. secret redaction
-6. model-output validation and prompt-injection defenses
-7. audit logs
-8. resource quotas
-9. explicit approval for high-risk transformations
+A schema-valid model response is still not authoritative product truth. Evidence and inference remain separate, and transformations require their own bounded validation.
 
-A model response must never be treated as authorization to execute a shell command, access a secret, or write outside the approved workspace.
+## Browser execution limitation
+
+ARQEN does not currently execute arbitrary analyzed repositories inside the orchestrator. Browser execution, when introduced, must use a separate sandbox with explicit filesystem, process and network boundaries. Until that exists, static analysis must not claim observed browser behavior.
+
+## Remaining risks
+
+- dependency installation can execute package lifecycle scripts if performed outside a sandbox
+- local provider endpoints may have broader network visibility than ARQEN can enforce
+- schema-valid output can still be semantically wrong
+- source parsing does not make arbitrary repository code safe to execute
