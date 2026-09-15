@@ -1,7 +1,17 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { UIIR_VERSION, validateUIIR } from "../src/schema";
 
+const canonicalJsonSchema = JSON.parse(
+  readFileSync(resolve(__dirname, "../schema/uiir-0.2.0.schema.json"), "utf8"),
+) as { properties: { version: { const: string } } };
+
 describe("UIIR validation", () => {
+  it("keeps the canonical JSON Schema version aligned with the TypeScript model", () => {
+    expect(canonicalJsonSchema.properties.version.const).toBe(UIIR_VERSION);
+  });
+
   it("rejects documents without required structure", () => {
     const issues = validateUIIR({ version: UIIR_VERSION });
     expect(issues.some((issue) => issue.path === "project")).toBe(true);
