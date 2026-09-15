@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+import * as ts from "typescript";
 import type { Component, DesignSystem, Project, SourceFile } from "@arqen/core";
 
 const IGNORED = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".turbo", ".vercel"]);
@@ -180,6 +180,14 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
         valueCounts.set(value, current);
       }
     }
+    for (const match of text.matchAll(/(?:bg|text|border|rounded|p|px|py|m|mx|my|gap)-\[([^\]]+)\]/g)) {
+      const value = match[1].trim();
+      if (!value) continue;
+      const category = tokenCategory(match[0], value);
+      const current = valueCounts.get(value) ?? { category, count: 0 };
+      current.count += 1;
+      valueCounts.set(value, current);
+    }
     for (const match of text.matchAll(/<([A-Z][A-Za-z0-9_.]*)\b/g)) {
       const name = match[1];
       const current = componentCounts.get(name) ?? { count: 0, files: new Set<string>() };
@@ -188,41 +196,36 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
       componentCounts.set(name, current);
     }
   }
-  const repeatedValues = [...valueCounts.entries()]
-    .filter(([, item]) => item.count > 1)
-    .map(([value, item]) => ({ value, count: item.count, category: item.category }));
-  const componentPatterns = [...componentCounts.entries()]
-    .filter(([, item]) => item.count >= 2)
-    .map(([name, item]) => ({ name, count: item.count, files: [...item.files] }));
-  return { tokens, repeatedValues, componentPatterns };
+  for (const [value, item] of valueCounts) if (item.count >= 3) tokens.push({ name: `repeated:${value}`, category: item.category, value, source: "inferred" });
+  return {
+    tokens,
+    repeatedValues: [...valueCounts.entries()].filter(([, item]) => item.count >= 2).map(([value, item]) => ({ value, count: item.count, category: item.category })),
+    componentPatterns: [...componentCounts.entries()].filter(([, item]) => item.count >= 3).map(([name, item]) => ({ name, count: item.count, files: [...item.files] })),
+  };
+}
+
+function detectLanguage(files: SourceFile[]): Project["language"] {
+  const tsCount = files.filter((file) => [".ts", ".tsx"].includes(file.extension)).length;
+  const jsCount = files.filter((file) => [".js", ".jsx", ".mjs", ".cjs"].includes(file.extension)).length;
+  if (tsCount && jsCount) return "mixed";
+  if (tsCount) return "typescript";
+  if (jsCount) return "javascript";
+  return "unknown";
 }
 
 export function analyzeProject(root: string): Project {
-  const resolvedRoot = path.resolve(root);
-  const packageJson = readJson(resolvedRoot, "package.json");
-  const rawFiles = walk(resolvedRoot);
-  const files: SourceFile[] = rawFiles.map((file) => ({ path: path.relative(resolvedRoot, file), extension: path.extname(file), bytes: fs.statSync(file).size, language: /\.tsx?$/.test(file) ? "typescript" : /\.jsx?$/.test(file) ? "javascript" : "mixed" }));
-  const language: Project["language"] = files.some((file) => file.extension === ".tsx" || file.extension === ".ts") && files.some((file) => file.extension === ".jsx" || file.extension === ".js") ? "mixed" : files.some((file) => /\.tsx?$/.test(file.extension)) ? "typescript" : files.some((file) => /\.jsx?$/.test(file.extension)) ? "javascript" : "unknown";
-  const framework = detectFramework(resolvedRoot, packageJson);
-  const components = parseComponents(resolvedRoot, rawFiles);
-  const designSystem = extractDesignSystem(resolvedRoot, rawFiles);
-  const routes = rawFiles.filter((file) => /(^|\/)(page|route)\.(tsx|ts|jsx|js)$/.test(file) || /pages\/.*\.(tsx|ts|jsx|js)$/.test(file)).map((file) => ({ path: routeForFile(resolvedRoot, file), file: path.relative(resolvedRoot, file), kind: /route\./.test(file) ? "api" as const : "page" as const }));
-  const pkgName = typeof packageJson?.name === "string" ? packageJson.name : path.basename(resolvedRoot);
-  return { root: resolvedRoot, name: pkgName, framework, language, packageManager: detectPackageManager(resolvedRoot), styling: detectStyling(resolvedRoot, rawFiles), files, entryPoints: findEntryPoints(resolvedRoot, rawFiles), routes, components, designSystem };
-}
-
-function routeForFile(root: string, file: string): string {
-  const relative = path.relative(root, file).replaceAll(path.sep, "/");
-  if (relative.includes("app/")) {
-    const route = relative.split("app/")[1].replace(/\/(page|route)\.(tsx|ts|jsx|js)$/, "").replace(/\/(layout)\.(tsx|ts|jsx|js)$/, "");
-    return `/${route === "" ? "" : route}`.replace(/\/$/, "") || "/";
-  }
-  const route = relative.split("pages/")[1]?.replace(/\.(tsx|ts|jsx|js)$/, "").replace(/\/index$/, "") ?? "/";
-  return `/${route}`.replace(/\/$/, "") || "/";
-}
-
-function findEntryPoints(root: string, files: string[]): string[] {
-  const relativeFiles = new Set(files.map((file) => path.relative(root, file).replaceAll(path.sep, "/")));
-  const names = ["src/main.tsx", "src/main.ts", "src/index.tsx", "src/index.ts", "app/layout.tsx", "pages/_app.tsx", "src/App.tsx", "src/App.jsx"];
-  return names.filter((name) => relativeFiles.has(name));
+  const absoluteRoot = path.resolve(root);
+  const rawFiles = walk(absoluteRoot);
+  const files: SourceFile[] = rawFiles.map((file) => {
+    const extension = path.extname(file).toLowerCase();
+    return { path: path.relative(absoluteRoot, file).replaceAll(path.sep, "/"), extension, bytes: fs.statSync(file).size, language: [".ts", ".tsx"].includes(extension) ? "typescript" : [".js", ".jsx", ".mjs", ".cjs"].includes(extension) ? "javascript" : "unknown" };
+  });
+  const pkg = readJson(absoluteRoot, "package.json");
+  const name = typeof pkg?.name === "string" ? pkg.name : path.basename(absoluteRoot);
+  const framework = detectFramework(absoluteRoot, pkg);
+  const styling = detectStyling(absoluteRoot, rawFiles);
+  const entryPoints = files.filter((file) => /(^|\/)(main|index|App|app)\.(tsx?|jsx?|mjs|cjs)$/.test(file.path)).map((file) => file.path);
+  const components = parseComponents(absoluteRoot, rawFiles);
+  const routes = files.filter((file) => /(^|\/)(pages|app|routes)\//.test(file.path) && UI_EXTENSIONS.has(file.extension)).map((file) => ({ path: `/${file.path.replace(/\.(tsx?|jsx?)$/, "").replace(/(^|\/)index$/, "")}`, file: file.path, kind: "page" as const }));
+  return { root: absoluteRoot, name, framework, language: detectLanguage(files), packageManager: detectPackageManager(absoluteRoot), styling, files, entryPoints, routes, components, designSystem: extractDesignSystem(absoluteRoot, rawFiles) };
 }
