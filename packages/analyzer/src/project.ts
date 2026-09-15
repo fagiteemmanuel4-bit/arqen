@@ -5,7 +5,7 @@ import type { Component, DesignSystem, Project, SourceFile } from "@arqen/core";
 
 const IGNORED = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".turbo", ".vercel"]);
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".sass"]);
-const UI_EXTENSIONS = new Set([".tsx", ".jsx", ".ts", ".js"]);
+const UI_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 
 function walk(root: string): string[] {
   const files: string[] = [];
@@ -109,7 +109,6 @@ function parseComponents(root: string, files: string[]): Component[] {
     const visit = (node: ts.Node) => {
       if (ts.isFunctionDeclaration(node)) {
         if (node.name) addFunction(node.name.text, node, "function", hasExportModifier(node));
-        else if (node.parent && ts.isSourceFile(node.parent) && node.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) addFunction("default", node, "function", true);
       }
       if (ts.isClassDeclaration(node) && node.name && isComponentName(node.name.text)) {
         const heritage = node.heritageClauses?.some((clause) => /(?:React\.)?Component|PureComponent/.test(clause.getText(source))) ?? false;
@@ -223,6 +222,7 @@ function routeForFile(root: string, file: string): string {
 }
 
 function findEntryPoints(root: string, files: string[]): string[] {
+  const relativeFiles = new Set(files.map((file) => path.relative(root, file).replaceAll(path.sep, "/")));
   const names = ["src/main.tsx", "src/main.ts", "src/index.tsx", "src/index.ts", "app/layout.tsx", "pages/_app.tsx", "src/App.tsx", "src/App.jsx"];
-  return names.filter((name) => files.includes(path.join(root, name))).map((name) => name);
+  return names.filter((name) => relativeFiles.has(name));
 }
