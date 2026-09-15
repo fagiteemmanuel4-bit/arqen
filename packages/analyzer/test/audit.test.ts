@@ -32,7 +32,7 @@ describe("auditProject", () => {
 
   it("reports static responsive risk as a possibility rather than an observed failure", () => {
     const root = fixture(`
-      export const App = () => <main><div className="w-[900px] flex overflow-hidden"><aside /><section /></div><div style={{width: "760px"}} /></main>;
+      export const App = () => <main><div className="w-[900px] flex overflow-hidden"><aside /><section /></div><div className="w-[760px]" /></main>;
     `);
     const result = auditProject(analyzeProject(root));
     const finding = result.findings.find((item) => item.rule === "responsive.fixed-width-risk");
