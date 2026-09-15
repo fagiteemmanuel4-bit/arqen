@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from reasoning import Finding, RecommendationRequest, normalize_recommendations
 from validation import ArtifactValidationError, validate_artifact
 
 
@@ -58,3 +59,55 @@ def test_oversized_response_is_rejected() -> None:
     oversized = "{" + "x" * 256_001 + "}"
     with pytest.raises(ArtifactValidationError, match="size limit"):
         validate_artifact(oversized, UIIR_SCHEMA, provider_name="test")
+
+
+def recommendation_request(risk: str = "low") -> RecommendationRequest:
+    return RecommendationRequest(findings=[Finding(
+        id="accessibility:image-alt:1",
+        category="accessibility",
+        severity="high",
+        confidence=0.93,
+        risk=risk,
+        title="Images may be missing alternative text",
+        evidence=["1 img element lacks alt"],
+        affected_files=["src/App.tsx"],
+        potential_fixes=["Add certain alt text"],
+    )])
+
+
+def recommendation(**overrides: object) -> dict:
+    value = {
+        "findingId": "accessibility:image-alt:1",
+        "priority": "high",
+        "rationale": "The source evidence indicates a missing accessible name.",
+        "proposedChange": "Add an appropriate alt attribute.",
+        "affectedFiles": ["src/App.tsx"],
+        "safeToAutomate": False,
+    }
+    value.update(overrides)
+    return {"summary": "Prioritized accessibility work.", "recommendations": [value]}
+
+
+def test_unknown_finding_id_is_rejected_after_schema_validation() -> None:
+    value = recommendation(findingId="missing:1")
+    with pytest.raises(ValueError, match="unknown finding ID"):
+        normalize_recommendations(value, recommendation_request())
+
+
+def test_unknown_affected_file_is_rejected() -> None:
+    value = recommendation(affectedFiles=["src/NotInFinding.tsx"])
+    with pytest.raises(ValueError, match="not attached"):
+        normalize_recommendations(value, recommendation_request())
+
+
+def test_high_risk_finding_cannot_be_marked_safe_to_automate() -> None:
+    value = recommendation(safeToAutomate=True)
+    with pytest.raises(ValueError, match="High-risk"):
+        normalize_recommendations(value, recommendation_request(risk="high"))
+
+
+def test_normalization_bounds_confidence_and_preserves_evidence() -> None:
+    value = recommendation(confidence=1.0, evidence=["model evidence"])
+    result = normalize_recommendations(value, recommendation_request())
+    assert result["recommendations"][0]["confidence"] == 1.0
+    assert result["recommendations"][0]["evidence"] == ["model evidence"]
