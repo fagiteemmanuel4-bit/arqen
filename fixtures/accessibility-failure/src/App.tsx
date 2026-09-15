@@ -1,0 +1,1 @@
+export const App = () => <main><h1>Checkout</h1><button><span aria-hidden="true">×</span></button><img src="/product.png" /><input placeholder="Card number" /><textarea placeholder="Notes" /><a href="/terms">here</a><h3>Payment</h3></main>;
