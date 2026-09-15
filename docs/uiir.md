@@ -4,11 +4,11 @@ UIIR is ARQEN's framework-neutral interface representation.
 
 ## Canonical schema strategy
 
-The TypeScript UIIR domain model in `packages/uiir/src/schema.ts` is the canonical domain definition. The versioned JSON Schema at `packages/uiir/schema/uiir-0.2.0.schema.json` is the interoperability artifact consumed by the Python orchestrator and external tooling.
+The versioned JSON Schema at `packages/uiir/schema/uiir-0.2.0.schema.json` is the shared runtime/interoperability contract. The TypeScript definitions in `packages/uiir/src/schema.ts` are the compile-time domain representation and are validated against the same JSON Schema at runtime through Ajv. The Python orchestrator consumes the same schema with `jsonschema`.
 
-When the TypeScript domain model changes, the JSON Schema artifact must be regenerated or deliberately versioned in the same change. The orchestrator must never maintain a second hand-written UIIR schema.
+This avoids maintaining separate hand-written validation contracts in TypeScript and Python. A schema change must be deliberately versioned and covered by both TypeScript and Python compatibility tests.
 
-The Python boundary validates every model-produced UIIR artifact against the versioned JSON Schema before returning it to callers.
+The orchestrator validates every model-produced UIIR artifact against the versioned JSON Schema before returning it to callers.
 
 ## Required top-level structure
 
@@ -33,4 +33,4 @@ UIIR is intentionally smaller than a full browser DOM. It represents product-rel
 
 ## Compatibility testing
 
-The orchestrator test suite covers valid documents, missing required fields, unknown top-level fields, version mismatches, fenced JSON responses and bounded response size. These tests run without provider credentials.
+The TypeScript suite covers valid documents, missing required fields, unknown top-level fields, version mismatches, duplicate IDs and malformed routes. The Python orchestrator suite covers the same trust boundary plus fenced JSON responses and bounded response size. These tests run without provider credentials.
