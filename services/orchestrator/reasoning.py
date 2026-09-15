@@ -64,3 +64,29 @@ def build_reasoning_prompt(request: RecommendationRequest) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def normalize_recommendations(artifact: dict[str, Any], request: RecommendationRequest) -> dict[str, Any]:
+    """Apply deterministic referential and automation-safety checks after schema validation."""
+    findings = {finding.id: finding for finding in request.findings}
+    normalized: list[dict[str, Any]] = []
+    for recommendation in artifact.get("recommendations", []):
+        finding_id = recommendation["findingId"]
+        finding = findings.get(finding_id)
+        if finding is None:
+            raise ValueError(f"Recommendation references unknown finding ID: {finding_id}")
+
+        affected_files = recommendation["affectedFiles"]
+        allowed_files = set(finding.affected_files)
+        if any(file not in allowed_files for file in affected_files):
+            raise ValueError(f"Recommendation references files not attached to finding {finding_id}")
+
+        if recommendation["safeToAutomate"] and finding.risk == "high":
+            raise ValueError(f"High-risk finding cannot be marked safeToAutomate: {finding_id}")
+
+        item = dict(recommendation)
+        item["confidence"] = max(0.0, min(1.0, float(item.get("confidence", finding.confidence))))
+        item["evidence"] = list(item.get("evidence", finding.evidence))[:8]
+        normalized.append(item)
+
+    return {"summary": artifact["summary"], "recommendations": normalized}
