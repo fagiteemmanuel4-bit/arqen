@@ -14,6 +14,7 @@ The 0.2 foundation can:
 - extract CSS custom-property design tokens and reuse signals
 - produce evidence-based deterministic design audits
 - validate versioned UIIR documents
+- validate model-produced UIIR and recommendation artifacts before they cross into deterministic systems
 - generate a constrained, dry-run transformation plan with backup/rollback semantics
 - expose a model-provider abstraction for OpenRouter, OpenAI, Anthropic, Gemini and local OpenAI-compatible endpoints
 - provide a CLI surface for `init`, `analyze`, `audit`, `review`, `fix`, `diff` and `validate`
@@ -33,6 +34,8 @@ Framework-neutral domain model
 UIIR / evidence
        ↓
 Deterministic audit ── optional model reasoning
+       ↓
+Schema validation boundary
        ↓
 Recommendations
        ↓
@@ -54,11 +57,11 @@ apps/
 packages/
   core/                   # framework-neutral project/domain model
   design-system/          # canonical ARQEN visual tokens
-  uiir/                   # versioned UI Intermediate Representation
+  uiir/                   # versioned UI Intermediate Representation + schema artifact
   analyzer/               # source/project analysis + audit rules
   transform/              # bounded transformation plans
 services/
-  orchestrator/           # model provider routing + structured design endpoint
+  orchestrator/           # model provider routing + validated structured design endpoint
 docs/
   architecture/
   product/
@@ -82,9 +85,9 @@ Use `--json` for machine-readable output. `fix` is dry-run by default; `--apply`
 
 ## Model providers
 
-Set `ARQEN_PROVIDER` to `openrouter`, `openai`, `anthropic`, `gemini` or `local`. Credentials stay in environment variables. The orchestrator never places provider secrets in frontend code.
+Set `ARQEN_PROVIDER` to `openrouter`, `openai`, `anthropic`, `gemini` or `local`. Credentials stay in environment variables. Provider responses are bounded, parsed and validated against the expected structured schema before ARQEN accepts them.
 
-See `services/orchestrator/.env.example`.
+See `services/orchestrator/.env.example` and `docs/security.md`.
 
 ## Status
 
