@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "jsx": "react-jsx", "outDir": "dist", "rootDir": "src", "noEmit": false },
+  "compilerOptions": { "lib": ["ES2022", "DOM", "DOM.Iterable"], "jsx": "react-jsx", "module": "ESNext", "moduleResolution": "Bundler", "outDir": "dist", "rootDir": "src", "noEmit": false, "isolatedModules": true },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
