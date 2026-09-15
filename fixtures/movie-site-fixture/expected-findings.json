@@ -1,0 +1,17 @@
+{
+  "mustDetect": [
+    "decoration.rounded-containers",
+    "decoration.shadow-density",
+    "accessibility.image-alt",
+    "responsive.fixed-width-risk"
+  ],
+  "mayDetect": [
+    "responsive.overflow-clipping",
+    "components.repeated-patterns"
+  ],
+  "mustNotClaim": [
+    "observed-mobile-overflow",
+    "visual-score",
+    "AI-generated"
+  ]
+}
