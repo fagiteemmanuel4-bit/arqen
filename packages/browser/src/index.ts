@@ -51,20 +51,20 @@ function resolveTarget(target: string, allowedRoot: string): string {
   return `file://${filePath}`;
 }
 
-async function inspectPage(page: Page, name: BrowserViewportName, viewport: { width: number; height: number }, outputDir: string, timeoutMs: number): Promise<VisualEvidence> {
+async function inspectPage(page: Page, target: string, name: BrowserViewportName, viewport: { width: number; height: number }, outputDir: string, timeoutMs: number): Promise<VisualEvidence> {
   const consoleErrors: string[] = [];
   const failedRequests: Array<{ url: string; method: string; failure?: string }> = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("requestfailed", (request) => failedRequests.push({ url: request.url(), method: request.method(), failure: request.failure()?.errorText }));
   await page.setViewportSize(viewport);
-  await page.goto(page.url(), { waitUntil: "load", timeout: timeoutMs });
+  await page.goto(target, { waitUntil: "load", timeout: timeoutMs });
   const measurements = await page.locator("body *").evaluateAll((elements) => elements.slice(0, 500).map((element) => {
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     return { selector: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}${element.className && typeof element.className === "string" ? `.${element.className.trim().split(/\\s+/).slice(0, 2).join(".")}` : ""}`, tag: element.tagName.toLowerCase(), x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
   }));
   const dimensions = await page.evaluate(() => ({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, documentWidth: document.documentElement.scrollWidth, documentHeight: document.documentElement.scrollHeight }));
-  const ariaSnapshot = await page.ariaSnapshotJSON({ boxes: true });
+  const ariaSnapshot = await page.locator("body").ariaSnapshot({ ref: true });
   const axe = await new AxeBuilder({ page }).analyze();
   const screenshotPath = path.join(outputDir, `${name}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -103,8 +103,7 @@ export async function inspectLocalFixture(options: BrowserInspectionOptions): Pr
         }
       });
       const page = await context.newPage();
-      await page.goto(target, { waitUntil: "load", timeout: options.timeoutMs ?? 15000 });
-      evidence.push(await inspectPage(page, name, viewports[name], outputDir, options.timeoutMs ?? 15000));
+      evidence.push(await inspectPage(page, target, name, viewports[name], outputDir, options.timeoutMs ?? 15000));
       await context.close();
     }
     return { target, evidence };
