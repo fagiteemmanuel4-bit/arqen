@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from validation import ArtifactValidationError, validate_artifact
+from validation import ArtifactValidationError, MAX_PROVIDER_RESPONSE_BYTES, validate_artifact
 
 
 class ProviderError(RuntimeError):
@@ -25,6 +25,35 @@ class ProviderConfig:
     model: str
     api_key: str
     base_url: str | None = None
+
+
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> httpx.Response:
+    attempts = max(1, min(int(os.getenv("ARQEN_PROVIDER_RETRIES", "1")) + 1, 3))
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code in {408, 429} or response.status_code >= 500:
+                if attempt + 1 < attempts:
+                    continue
+            response.raise_for_status()
+            if len(response.content) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise ProviderError("Provider response exceeds the configured size limit")
+            return response
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                continue
+            raise
+        except httpx.HTTPError:
+            raise
+    raise ProviderError("Provider request failed") from last_error
 
 
 def _validated(text: str, schema: dict[str, Any], provider_name: str) -> dict[str, Any]:
@@ -51,13 +80,12 @@ class OpenAICompatibleProvider:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/chat/completions", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError(f"{self.name} request failed") from exc
         try:
             content = response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError(f"{self.name} returned an unexpected response") from exc
         return _validated(content, schema, self.name)
 
@@ -80,13 +108,12 @@ class AnthropicProvider:
         headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/v1/messages", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/v1/messages", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError("Anthropic request failed") from exc
         try:
             text = response.json()["content"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError("Anthropic returned an unexpected response") from exc
         return _validated(text, schema, self.name)
 
@@ -108,13 +135,12 @@ class GeminiProvider:
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/models/{self.model}:generateContent", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/models/{self.model}:generateContent", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError("Gemini request failed") from exc
         try:
             text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError("Gemini returned an unexpected response") from exc
         return _validated(text, schema, self.name)
 
