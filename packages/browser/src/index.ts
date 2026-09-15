@@ -74,7 +74,7 @@ async function inspectPage(page: Page, target: string, name: BrowserViewportName
     dimensions,
     overflow: { horizontal: dimensions.documentWidth > dimensions.viewportWidth, scrollWidth: dimensions.documentWidth, clientWidth: dimensions.viewportWidth },
     layoutMeasurements: measurements,
-    accessibility: { ariaSnapshot, violations: axe.violations.map((violation) => ({ id: violation.id, impact: violation.impact, description: violation.description, helpUrl: violation.helpUrl, nodes: violation.nodes.length })) },
+    accessibility: { ariaSnapshot, violations: axe.violations.map((violation) => ({ id: violation.id, impact: violation.impact ?? null, description: violation.description, helpUrl: violation.helpUrl, nodes: violation.nodes.length })) },
     consoleErrors,
     failedRequests,
   };
