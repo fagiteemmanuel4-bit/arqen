@@ -35,13 +35,19 @@ export interface BrowserInspectionReport {
   evidence: VisualEvidence[];
 }
 
+function resolveAllowedRoot(allowedRoot: string): string { return fs.realpathSync(path.resolve(allowedRoot)); }
+
+function assertInsideRoot(filePath: string, root: string): void {
+  const relative = path.relative(root, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Browser target or request is outside the allowed fixture root.");
+}
+
 function resolveTarget(target: string, allowedRoot: string): string {
-  const root = fs.realpathSync(path.resolve(allowedRoot));
+  const root = resolveAllowedRoot(allowedRoot);
   const url = new URL(target);
   if (url.protocol !== "file:") throw new Error("Browser inspection currently permits only file:// targets; server execution is not enabled.");
   const filePath = fs.realpathSync(decodeURIComponent(url.pathname));
-  const relative = path.relative(root, filePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Browser target is outside the allowed fixture root.");
+  assertInsideRoot(filePath, root);
   return `file://${filePath}`;
 }
 
@@ -75,7 +81,8 @@ async function inspectPage(page: Page, name: BrowserViewportName, viewport: { wi
 }
 
 export async function inspectLocalFixture(options: BrowserInspectionOptions): Promise<BrowserInspectionReport> {
-  const target = resolveTarget(options.target, options.allowedRoot);
+  const allowedRoot = resolveAllowedRoot(options.allowedRoot);
+  const target = resolveTarget(options.target, allowedRoot);
   const outputDir = path.resolve(options.outputDir);
   fs.mkdirSync(outputDir, { recursive: true });
   const viewports = { ...DEFAULT_VIEWPORTS, ...(options.viewports ?? {}) } as Record<BrowserViewportName, { width: number; height: number }>;
@@ -86,8 +93,14 @@ export async function inspectLocalFixture(options: BrowserInspectionOptions): Pr
       const context = await browser.newContext({ viewport: viewports[name], javaScriptEnabled: true });
       await context.route("**/*", async (route) => {
         const requestUrl = new URL(route.request().url());
-        if (requestUrl.protocol === "file:") return route.continue();
-        return route.abort();
+        if (requestUrl.protocol !== "file:") return route.abort();
+        try {
+          const requestPath = fs.realpathSync(decodeURIComponent(requestUrl.pathname));
+          assertInsideRoot(requestPath, allowedRoot);
+          return route.continue();
+        } catch {
+          return route.abort();
+        }
       });
       const page = await context.newPage();
       await page.goto(target, { waitUntil: "load", timeout: options.timeoutMs ?? 15000 });
