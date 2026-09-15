@@ -1,0 +1,10 @@
+{
+  "name": "@arqen/cli",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "bin": { "arqen": "dist/index.js" },
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": { "@arqen/analyzer": "workspace:*", "@arqen/transform": "workspace:*", "@arqen/uiir": "workspace:*", "commander": "^14.0.0" },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

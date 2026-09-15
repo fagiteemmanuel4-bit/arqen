@@ -1,0 +1,9 @@
+{
+  "name": "@arqen/uiir",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/schema.js" },
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

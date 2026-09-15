@@ -1,51 +1,59 @@
 # Architecture
 
-Arqen is organized as a modular monorepo. The boundaries below are intentional and should be preserved as the system grows.
+ARQEN is a modular monorepo. Boundaries are intentional and should remain visible as the system grows.
 
-## Apps
+## Core layers
 
-### `apps/studio`
-The user-facing product studio. It owns navigation, workspace UX, responsive behavior, previews, and interaction with Arqen services.
-
-## Packages
-
-### `packages/design-system`
-The canonical visual language: design tokens, primitives, components, patterns, states, and responsive rules.
+### `packages/core`
+Framework-neutral domain contracts for projects, source files, frameworks, routes, screens, components, tokens, layouts, interactions, state, responsive behavior and accessibility signals.
 
 ### `packages/uiir`
-The canonical contract for describing interfaces independent of a specific rendering technology.
+The versioned interface intermediate representation. UIIR is the contract between reasoning and deterministic rendering/validation. It is not a React component model.
 
-### `packages/renderer`
-Turns valid UIIR documents into the interactive React representation used by the studio and, later, generated projects.
+### `packages/analyzer`
+Read-only project understanding. Framework adapters and source parsers turn repository evidence into the core domain model. React/TSX currently uses the TypeScript compiler API rather than regex-only parsing.
 
-### `packages/shared`
-Small, stable contracts shared between packages and services. Keep this package dependency-light.
+### `packages/transform`
+Explicit, bounded transformation plans. Plans carry exact before/after source, reason and risk. Application verifies the original source before writing and creates a local backup for rollback.
 
-## Services
+### `packages/design-system`
+Canonical ARQEN visual tokens and primitives. This package is independent from analyzed projects; it describes ARQEN itself, not a project's extracted design system.
 
 ### `services/orchestrator`
-Python service responsible for AI workflows, model routing, tool execution, structured generation, and later agent coordination.
+Python model orchestration. Provider adapters normalize OpenRouter/OpenAI-compatible, Anthropic and Gemini structured generation behind one interface. The domain does not depend on a vendor.
 
-## Key architectural rule
+### `apps/studio`
+Current product studio prototype. It is allowed to evolve independently from the analysis engine.
 
-The model must not be the source of truth for the application's structure. Models propose structured artifacts; schemas validate them; deterministic systems render them.
+### `apps/site`
+Public technical/product presence. It must only describe implemented capabilities.
+
+## Fundamental boundary
 
 ```text
-LLM
- ↓
-Structured proposal
- ↓
-Schema validation
- ↓
-UIIR / product artifacts
- ↓
-Deterministic renderer
- ↓
-UI
+Repository
+   ↓
+Parser / framework adapter
+   ↓
+Core domain evidence
+   ↓
+UIIR + audit engine
+   ↓
+Model reasoning (optional)
+   ↓
+Validated recommendation
+   ↓
+Transformation plan
+   ↓
+Human-approved application
 ```
 
-This boundary is fundamental to reliability, editability, model portability, and future code generation.
+Models propose. Schemas validate. Deterministic systems decide what can be safely applied.
 
-## Mobile-first requirement
+## Security boundary
 
-The studio is a first-class mobile/tablet experience. Responsive behavior must be designed into the workspace and generated interfaces rather than added after desktop implementation.
+Analysis is read-only by default. Repository paths are not executed. Future command execution, browser rendering and sandboxing must run in an isolated capability boundary and never inherit arbitrary host credentials.
+
+## Why TypeScript + Python
+
+TypeScript is the natural host for JavaScript/TypeScript source understanding, UIIR consumers and the developer CLI. Python remains the orchestration layer because model/provider workflows and future analysis services can evolve independently. Neither language is allowed to become the product boundary.
