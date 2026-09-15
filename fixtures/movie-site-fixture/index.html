@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cinebase — Movie discovery fixture</title>
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+  <main>
+    <nav aria-label="Primary navigation">
+      <a href="#home">Cinebase</a><a href="#movies">Movies</a><a href="#genres">Genres</a><a href="#popular">Popular</a><a href="#watchlist">Watchlist</a>
+    </nav>
+    <section id="home" class="hero">
+      <div><p>FEATURED</p><h1>Dune: Part Two</h1><p>Paul Atreides joins Chani and the Fremen while seeking revenge against the conspirators who destroyed his family.</p><button>Watch trailer</button><button>View details</button></div>
+    </section>
+    <section id="movies" class="toolbar" aria-label="Movie filters">
+      <label for="search">Search movies</label><input id="search" placeholder="Search titles"><button>Search</button><button>Genres</button><button>Sort</button>
+    </section>
+    <section><h2>Trending this week</h2><div class="movie-grid">
+      <article class="movie-card"><img src="./poster.svg"><div><h3>Dune: Part Two</h3><p>2024 · Sci-Fi · ★ 8.7</p><button>Details</button><button>Add to watchlist</button></div></article>
+      <article class="movie-card"><img src="./poster.svg" alt="Arrival poster"><div><h3>Arrival</h3><p>2016 · Sci-Fi · ★ 8.0</p><button>Details</button><button>Add to watchlist</button></div></article>
+      <article class="movie-card"><img src="./poster.svg" alt="Parasite poster"><div><h3>Parasite</h3><p>2019 · Drama · ★ 8.5</p><button>Details</button><button>Add to watchlist</button></div></article>
+    </div></section>
+    <section class="loading" aria-label="Loading movies"><p>Loading more movies…</p></section>
+    <section class="empty" aria-live="polite"><h2>No movies found</h2><p>Try another search.</p></section>
+    <section class="carousel" aria-label="Popular movies"><h2>Popular now</h2><div class="carousel-track"><article>Whiplash · ★ 8.5</article><article>The Batman · ★ 7.8</article><article>Past Lives · ★ 7.8</article><article>Interstellar · ★ 8.7</article></div></section>
+    <footer><a href="#about">About Cinebase</a><a href="#privacy">Privacy</a><a href="#terms">Terms</a></footer>
+  </main>
+</body>
+</html>
