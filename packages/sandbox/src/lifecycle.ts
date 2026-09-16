@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { docker, dockerOrThrow, dockerAvailable, ensureImage, removeContainer } from "./docker.js";
 import { detectPackageManager, installDependencies, killContainer } from "./install.js";
-import { attachInstallNetwork, attachServeNetwork, createSandboxNetworks, destroySandboxNetworks, disconnectNetwork, isolatedEnvironment } from "./network.js";
+import { attachServeNetwork, createSandboxNetworks, destroySandboxNetworks, disconnectNetwork } from "./network.js";
 import { startDevServer } from "./serve.js";
-import { DEFAULT_SANDBOX_OPTIONS, type SandboxFailure, type SandboxOptions, type SandboxResult, type SandboxRuntime } from "./types.js";
+import { DEFAULT_SANDBOX_OPTIONS, type SandboxFailure, type SandboxOptions, type SandboxResult } from "./types.js";
 
 function failure(phase: SandboxFailure["phase"], code: SandboxFailure["code"], message: string, extra: Partial<SandboxFailure> = {}): SandboxResult {
   return { ok: false, error: { phase, code, message, ...extra } };
@@ -55,13 +55,8 @@ async function createContainer(repoPath: string, image: string, networks: Awaite
   return containerId;
 }
 
-async function startContainer(containerId: string): Promise<void> {
-  await dockerOrThrow(["start", containerId], 30_000);
-}
-
-async function stopAndRemove(containerId: string): Promise<void> {
-  await removeContainer(containerId);
-}
+async function startContainer(containerId: string): Promise<void> { await dockerOrThrow(["start", containerId], 30_000); }
+async function stopAndRemove(containerId: string): Promise<void> { await removeContainer(containerId); }
 
 export async function runSandbox(repoPath: string, options: SandboxOptions = {}): Promise<SandboxResult> {
   const validation = validateRepository(repoPath);
@@ -76,28 +71,36 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
   let containerId: string | undefined;
   let networks: Awaited<ReturnType<typeof createSandboxNetworks>> | undefined;
 
+  const cleanup = async () => {
+    if (containerId) await stopAndRemove(containerId).catch(() => undefined);
+    if (networks) await destroySandboxNetworks(networks, containerId).catch(() => undefined);
+    containerId = undefined;
+    networks = undefined;
+  };
+
   try {
     await ensureImage(image, options.rebuildImage ?? false);
     networks = await createSandboxNetworks(id, image);
     containerId = await createContainer(validation, image, networks, options, id);
-    await attachInstallNetwork(containerId, networks.installNetwork);
     await startContainer(containerId);
 
     const installTimeout = options.timeouts?.installMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.installMs;
-    const installArgs = options.installArgs ?? (manager === "npm" ? (fs.existsSync(path.join(validation, "package-lock.json")) ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"]) : ["install", "--frozen-lockfile", "--reporter", "append-only"]);
+    const installArgs = options.installArgs ?? (manager === "npm"
+      ? (fs.existsSync(path.join(validation, "package-lock.json")) ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"])
+      : ["install", "--frozen-lockfile", "--reporter", "append-only"]);
     const install = await installDependencies(containerId, manager, installArgs, installTimeout);
     if (install.timedOut) {
-      await killContainer(containerId);
+      await cleanup();
       return failure("installing", "INSTALL_TIMEOUT", `Dependency installation exceeded ${installTimeout}ms.`, { stdout: install.stdout, stderr: install.stderr });
     }
     if (install.code !== 0) {
-      await killContainer(containerId);
+      await cleanup();
       return failure("installing", "INSTALL_FAILED", "Dependency installation failed.", { exitCode: install.code, signal: install.signal ?? undefined, stdout: install.stdout, stderr: install.stderr });
     }
 
+    await attachServeNetwork(containerId, networks.serveNetwork);
     await disconnectNetwork(networks.installNetwork, containerId);
     await removeContainer(networks.proxyContainer);
-    await attachServeNetwork(containerId, networks.serveNetwork);
 
     const startupMs = options.timeouts?.startupMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.startupMs;
     const served = await startDevServer(containerId, options.port ?? DEFAULT_SANDBOX_OPTIONS.port, manager, options.serveCommand, options.serveArgs, startupMs);
@@ -107,7 +110,7 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
       if (stopped) return;
       stopped = true;
       if (maxRuntimeTimer) clearTimeout(maxRuntimeTimer);
-      await stopAndRemove(containerId!);
+      await stopAndRemove(containerId!).catch(() => undefined);
       if (networks) {
         await destroySandboxNetworks(networks, containerId).catch(() => undefined);
         networks = undefined;
@@ -117,10 +120,10 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
     if (maxRuntimeMs && maxRuntimeMs > 0) maxRuntimeTimer = setTimeout(() => { void stop(); }, maxRuntimeMs);
     return { ok: true, runtime: { containerId, containerPort: options.port ?? DEFAULT_SANDBOX_OPTIONS.port, hostPort: served.hostPort, url: served.url, phase: "ready", stop } };
   } catch (error) {
-    if (containerId) await stopAndRemove(containerId);
-    if (networks) await destroySandboxNetworks(networks, containerId).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
-    const code: SandboxFailure["code"] = message.toLowerCase().includes("image") ? "IMAGE_BUILD_FAILED" : message.toLowerCase().includes("http-ready") || message.toLowerCase().includes("published port") ? "SERVE_TIMEOUT" : "UNKNOWN";
+    await cleanup();
+    const lower = message.toLowerCase();
+    const code: SandboxFailure["code"] = lower.includes("image") ? "IMAGE_BUILD_FAILED" : lower.includes("http-ready") || lower.includes("published port") ? "SERVE_TIMEOUT" : lower.includes("development server") ? "SERVE_FAILED" : "UNKNOWN";
     return failure("failed", code, message);
   }
 }
