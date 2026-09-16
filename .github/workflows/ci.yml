@@ -19,7 +19,20 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @arqen/browser exec playwright install --with-deps chromium
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
+      - name: CLI smoke verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/cli/dist/index.js --help
+          node apps/cli/dist/index.js --version
+          node apps/cli/dist/index.js analyze fixtures/movie-site-fixture --json > /tmp/arqen-analyze.json
+          node apps/cli/dist/index.js audit fixtures/movie-site-fixture --json > /tmp/arqen-audit.json
+          node apps/cli/dist/index.js review . --json > /tmp/arqen-review.json
+          node apps/cli/dist/index.js diff fixtures/movie-site-fixture --json > /tmp/arqen-diff.json
+          node apps/cli/dist/index.js fix fixtures/movie-site-fixture --json > /tmp/arqen-fix.json
+          node apps/cli/dist/index.js validate fixtures/movie-site-fixture --json > /tmp/arqen-validate.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
