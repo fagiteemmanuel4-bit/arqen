@@ -62,10 +62,5 @@ export type SandboxResult =
 export const DEFAULT_SANDBOX_OPTIONS = {
   port: 3000,
   resources: { cpuCount: 2, memoryMb: 2048, pidsLimit: 512 },
-  timeouts: { installMs: 120_000, startupMs: 60_000 },
+  timeouts: { installMs: 120_000, startupMs: 60_000, maxRuntimeMs: 600_000 },
 } as const;
-
-export async function runInSandbox(repoPath: string, options?: SandboxOptions): Promise<SandboxResult> {
-  const { runSandbox } = await import("./lifecycle.js");
-  return runSandbox(repoPath, options);
-}
