@@ -166,8 +166,8 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
     const relative = path.relative(root, file).replaceAll(path.sep, "/");
     if (/\.(css|scss|sass)$/.test(file)) {
       for (const match of text.matchAll(/--([a-zA-Z0-9_-]+)\s*:\s*([^;]+);/g)) {
-        const name = `--${match[1]}`;
-        const value = match[2].trim();
+        const name = `--${match[1]!}`;
+        const value = match[2]!.trim();
         const category = tokenCategory(name, value);
         tokens.push({ name, category, value, source: relative });
         const current = valueCounts.get(value) ?? { category, count: 0 };
@@ -175,7 +175,7 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
         valueCounts.set(value, current);
       }
       for (const match of text.matchAll(/(?:color|background(?:-color)?|border(?:-color)?|box-shadow|border-radius|font-size|font-weight|line-height)\s*:\s*([^;{}]+);/gi)) {
-        const value = match[1].trim();
+        const value = match[1]!.trim();
         if (!value || value.startsWith("var(")) continue;
         const category = tokenCategory(match[0], value);
         const current = valueCounts.get(value) ?? { category, count: 0 };
@@ -184,7 +184,7 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
       }
     }
     for (const match of text.matchAll(/(?:bg|text|border|rounded|p|px|py|m|mx|my|gap)-\[([^\]]+)\]/g)) {
-      const value = match[1].trim();
+      const value = match[1]!.trim();
       if (!value) continue;
       const category = tokenCategory(match[0], value);
       const current = valueCounts.get(value) ?? { category, count: 0 };
@@ -192,7 +192,7 @@ function extractDesignSystem(root: string, files: string[]): DesignSystem {
       valueCounts.set(value, current);
     }
     for (const match of text.matchAll(/<([A-Z][A-Za-z0-9_.]*)\b/g)) {
-      const name = match[1];
+      const name = match[1]!;
       const current = componentCounts.get(name) ?? { count: 0, files: new Set<string>() };
       current.count += 1;
       current.files.add(relative);
