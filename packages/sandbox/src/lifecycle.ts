@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dockerAvailable, dockerOrThrow, ensureImage, removeContainer } from "./docker.js";
-import { detectPackageManager, installDependencies } from "./install.js";
+import { buildInstallArgs, detectPackageManager, installDependencies } from "./install.js";
 import { attachServeNetwork, createSandboxNetworks, destroySandboxNetworks, disconnectNetwork } from "./network.js";
 import { startDevServer } from "./serve.js";
 import { DEFAULT_SANDBOX_OPTIONS, type SandboxFailure, type SandboxOptions, type SandboxResult } from "./types.js";
 
 function failure(phase: SandboxFailure["phase"], code: SandboxFailure["code"], message: string, extra: Partial<SandboxFailure> = {}): SandboxResult { return { ok: false, error: { phase, code, message, ...extra } }; }
-
 function validateRepository(repoPath: string): string | SandboxFailure {
   try {
     const resolved = fs.realpathSync(path.resolve(repoPath));
@@ -16,7 +15,6 @@ function validateRepository(repoPath: string): string | SandboxFailure {
     return resolved;
   } catch (error) { return { phase: "preparing", code: "INVALID_REPOSITORY", message: error instanceof Error ? error.message : String(error) }; }
 }
-
 function safeId(): string { return `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
 function validateOptions(options: SandboxOptions): SandboxFailure | undefined {
   const port = options.port ?? DEFAULT_SANDBOX_OPTIONS.port;
@@ -27,7 +25,6 @@ function validateOptions(options: SandboxOptions): SandboxFailure | undefined {
   if (cpu <= 0 || memory <= 0 || pids <= 0) return { phase: "preparing", code: "UNKNOWN", message: "CPU, memory and PID limits must be positive." };
   return undefined;
 }
-
 async function createContainer(repoPath: string, image: string, networks: Awaited<ReturnType<typeof createSandboxNetworks>>, options: SandboxOptions, id: string): Promise<string> {
   const cpu = options.resources?.cpuCount ?? DEFAULT_SANDBOX_OPTIONS.resources.cpuCount;
   const memory = options.resources?.memoryMb ?? DEFAULT_SANDBOX_OPTIONS.resources.memoryMb;
@@ -38,11 +35,7 @@ async function createContainer(repoPath: string, image: string, networks: Awaite
   await dockerOrThrow(["cp", `${repoPath}/.`, `${containerId}:/workspace`], 120_000);
   return containerId;
 }
-
-async function prepareWorkspace(containerId: string): Promise<void> {
-  await dockerOrThrow(["exec", "-u", "0", containerId, "sh", "-c", "find /workspace -type d -name node_modules -prune -exec rm -rf {} +; chown -R 10001:10001 /workspace"], 120_000);
-}
-
+async function prepareWorkspace(containerId: string): Promise<void> { await dockerOrThrow(["exec", "-u", "0", containerId, "sh", "-c", "find /workspace -type d -name node_modules -prune -exec rm -rf {} +; chown -R 10001:10001 /workspace"], 120_000); }
 async function startContainer(containerId: string): Promise<void> { await dockerOrThrow(["start", containerId], 30_000); }
 async function stopAndRemove(containerId: string): Promise<void> { await removeContainer(containerId); }
 
@@ -52,7 +45,6 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
   const optionError = validateOptions(options);
   if (optionError) return { ok: false, error: optionError };
   if (!(await dockerAvailable())) return failure("preparing", "DOCKER_UNAVAILABLE", "Docker Engine is unavailable. Start Docker and retry.");
-
   const manager = options.packageManager ?? detectPackageManager(validation);
   const image = options.image ?? "arqen-sandbox:0.1.0";
   const id = safeId();
@@ -68,7 +60,8 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
     await prepareWorkspace(containerId);
 
     const installTimeout = options.timeouts?.installMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.installMs;
-    const installArgs = options.installArgs ?? (manager === "npm" ? (fs.existsSync(path.join(validation, "package-lock.json")) ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"]) : ["install", "--frozen-lockfile", "--reporter", "append-only"]);
+    const hasLockfile = fs.existsSync(path.join(validation, "pnpm-lock.yaml")) || fs.existsSync(path.join(validation, "package-lock.json")) || fs.existsSync(path.join(validation, "npm-shrinkwrap.json"));
+    const installArgs = buildInstallArgs(manager, hasLockfile, options.installArgs);
     const install = await installDependencies(containerId, manager, installArgs, installTimeout);
     if (install.timedOut) { await cleanup(); return failure("installing", "INSTALL_TIMEOUT", `Dependency installation exceeded ${installTimeout}ms.`, { stdout: install.stdout, stderr: install.stderr }); }
     if (install.code !== 0) { await cleanup(); return failure("installing", "INSTALL_FAILED", "Dependency installation failed.", { exitCode: install.code, signal: install.signal ?? undefined, stdout: install.stdout, stderr: install.stderr }); }
@@ -81,13 +74,7 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
     const served = await startDevServer(containerId, options.port ?? DEFAULT_SANDBOX_OPTIONS.port, manager, options.serveCommand, options.serveArgs, startupMs);
     let stopped = false;
     let maxRuntimeTimer: NodeJS.Timeout | undefined;
-    const stop = async () => {
-      if (stopped) return;
-      stopped = true;
-      if (maxRuntimeTimer) clearTimeout(maxRuntimeTimer);
-      await stopAndRemove(containerId!).catch(() => undefined);
-      if (networks) { await destroySandboxNetworks(networks, containerId).catch(() => undefined); networks = undefined; }
-    };
+    const stop = async () => { if (stopped) return; stopped = true; if (maxRuntimeTimer) clearTimeout(maxRuntimeTimer); await stopAndRemove(containerId!).catch(() => undefined); if (networks) { await destroySandboxNetworks(networks, containerId).catch(() => undefined); networks = undefined; } };
     const maxRuntimeMs = options.timeouts?.maxRuntimeMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.maxRuntimeMs;
     if (maxRuntimeMs && maxRuntimeMs > 0) maxRuntimeTimer = setTimeout(() => { void stop(); }, maxRuntimeMs);
     return { ok: true, runtime: { containerId, containerPort: options.port ?? DEFAULT_SANDBOX_OPTIONS.port, hostPort: served.hostPort, url: served.url, phase: "ready", stop } };
