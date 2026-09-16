@@ -11,7 +11,10 @@ export interface FileEdit {
   before: string;
   after: string;
   reason: string;
+  expectedOutcome: string;
   risk: TransformationRisk;
+  confidence: number;
+  validationStrategy: string[];
 }
 
 export interface TransformationPlan {
@@ -21,9 +24,7 @@ export interface TransformationPlan {
   createdAt: string;
 }
 
-export function createPlan(edits: FileEdit[], dryRun = true): TransformationPlan {
-  return { id: createHash("sha256").update(JSON.stringify(edits)).digest("hex").slice(0, 16), dryRun, edits, createdAt: new Date().toISOString() };
-}
+export function createPlan(edits: FileEdit[], dryRun = true): TransformationPlan { return { id: createHash("sha256").update(JSON.stringify(edits)).digest("hex").slice(0, 16), dryRun, edits, createdAt: new Date().toISOString() }; }
 
 function safeTarget(root: string, relativePath: string): string {
   const rootPath = path.resolve(root);
@@ -71,7 +72,16 @@ export function buildSafeAuditPlan(project: Project, audit: AuditResult): Transf
       const absolute = safeTarget(project.root, cssFile.path);
       const before = fs.readFileSync(absolute, "utf8");
       const after = `:root { --arqen-space-1: 0.25rem; --arqen-space-2: 0.5rem; --arqen-space-3: 0.75rem; --arqen-space-4: 1rem; }\n\n${before}`;
-      edits.push({ path: cssFile.path, before, after, reason: tokenFinding.recommendation, risk: "low" });
+      edits.push({
+        path: cssFile.path,
+        before,
+        after,
+        reason: tokenFinding.recommendation,
+        expectedOutcome: "Provide a small explicit spacing token baseline without rewriting existing declarations.",
+        risk: "low",
+        confidence: tokenFinding.confidence,
+        validationStrategy: ["re-analyze design tokens", "run deterministic audit", "inspect diff before approval"],
+      });
     }
   }
   return createPlan(edits, true);

@@ -1,0 +1,1 @@
+export const App = () => <main><header className="flex"><h1>Analytics</h1><nav className="flex"><a href="/one">One</a><a href="/two">Two</a><a href="/three">Three</a></nav></header><section className="w-[1200px]"><div className="grid grid-cols-6"><article /><article /><article /><article /><article /><article /></div></section></main>;

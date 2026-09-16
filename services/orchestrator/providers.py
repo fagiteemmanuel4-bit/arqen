@@ -5,6 +5,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from validation import ArtifactValidationError, MAX_PROVIDER_RESPONSE_BYTES, validate_artifact
+
 
 class ProviderError(RuntimeError):
     pass
@@ -25,14 +27,40 @@ class ProviderConfig:
     base_url: str | None = None
 
 
-def _json_object(text: str) -> dict[str, Any]:
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> httpx.Response:
+    attempts = max(1, min(int(os.getenv("ARQEN_PROVIDER_RETRIES", "1")) + 1, 3))
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code in {408, 429} or response.status_code >= 500:
+                if attempt + 1 < attempts:
+                    continue
+            response.raise_for_status()
+            if len(response.content) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise ProviderError("Provider response exceeds the configured size limit")
+            return response
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                continue
+            raise
+        except httpx.HTTPError:
+            raise
+    raise ProviderError("Provider request failed") from last_error
+
+
+def _validated(text: str, schema: dict[str, Any], provider_name: str) -> dict[str, Any]:
     try:
-        value = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ProviderError("Provider returned invalid JSON") from exc
-    if not isinstance(value, dict):
-        raise ProviderError("Provider returned a JSON value instead of an object")
-    return value
+        return validate_artifact(text, schema, provider_name=provider_name)
+    except ArtifactValidationError as exc:
+        raise ProviderError(str(exc)) from exc
 
 
 class OpenAICompatibleProvider:
@@ -52,15 +80,14 @@ class OpenAICompatibleProvider:
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/chat/completions", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError(f"{self.name} request failed") from exc
         try:
             content = response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError(f"{self.name} returned an unexpected response") from exc
-        return _json_object(content)
+        return _validated(content, schema, self.name)
 
 
 class AnthropicProvider:
@@ -72,19 +99,23 @@ class AnthropicProvider:
         self.base_url = (config.base_url or "https://api.anthropic.com").rstrip("/")
 
     async def generate_json(self, *, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
-        payload = {"model": self.model, "max_tokens": 4096, "system": system, "messages": [{"role": "user", "content": user}]}
+        payload = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": f"{system}\nReturn exactly one JSON object matching this schema; do not emit implementation code:\n{json.dumps(schema, separators=(',', ':'))}",
+            "messages": [{"role": "user", "content": user}],
+        }
         headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/v1/messages", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/v1/messages", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError("Anthropic request failed") from exc
         try:
             text = response.json()["content"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError("Anthropic returned an unexpected response") from exc
-        return _json_object(text)
+        return _validated(text, schema, self.name)
 
 
 class GeminiProvider:
@@ -104,15 +135,14 @@ class GeminiProvider:
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(f"{self.base_url}/models/{self.model}:generateContent", headers=headers, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
+                response = await _post_with_retry(client, f"{self.base_url}/models/{self.model}:generateContent", headers=headers, payload=payload)
+        except (httpx.HTTPError, ProviderError) as exc:
             raise ProviderError("Gemini request failed") from exc
         try:
             text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError("Gemini returned an unexpected response") from exc
-        return _json_object(text)
+        return _validated(text, schema, self.name)
 
 
 def provider_from_env() -> ModelProvider:
@@ -120,21 +150,25 @@ def provider_from_env() -> ModelProvider:
     model = os.getenv("ARQEN_MODEL", "openai/gpt-4o-mini")
     if provider == "openrouter":
         key = os.getenv("OPENROUTER_API_KEY", "")
-        if not key: raise ProviderError("OPENROUTER_API_KEY is not configured")
+        if not key:
+            raise ProviderError("OPENROUTER_API_KEY is not configured")
         return OpenAICompatibleProvider(ProviderConfig(provider, model, key, os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")), name="openrouter")
     if provider == "openai":
         key = os.getenv("OPENAI_API_KEY", "")
-        if not key: raise ProviderError("OPENAI_API_KEY is not configured")
+        if not key:
+            raise ProviderError("OPENAI_API_KEY is not configured")
         return OpenAICompatibleProvider(ProviderConfig(provider, model, key), name="openai")
     if provider == "local":
         key = os.getenv("ARQEN_LOCAL_API_KEY", "local")
         return OpenAICompatibleProvider(ProviderConfig(provider, model, key, os.getenv("ARQEN_LOCAL_BASE_URL", "http://localhost:11434/v1")), name="local")
     if provider == "anthropic":
         key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not key: raise ProviderError("ANTHROPIC_API_KEY is not configured")
+        if not key:
+            raise ProviderError("ANTHROPIC_API_KEY is not configured")
         return AnthropicProvider(ProviderConfig(provider, model, key, os.getenv("ANTHROPIC_BASE_URL")))
     if provider == "gemini":
         key = os.getenv("GEMINI_API_KEY", "")
-        if not key: raise ProviderError("GEMINI_API_KEY is not configured")
+        if not key:
+            raise ProviderError("GEMINI_API_KEY is not configured")
         return GeminiProvider(ProviderConfig(provider, model, key, os.getenv("GEMINI_BASE_URL")))
     raise ProviderError(f"Unsupported ARQEN_PROVIDER: {provider}")

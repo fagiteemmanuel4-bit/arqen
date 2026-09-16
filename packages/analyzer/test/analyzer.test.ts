@@ -22,7 +22,7 @@ describe("project analyzer", () => {
       writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "fixture", dependencies: { react: "latest" } }));
       writeFileSync(path.join(root, "src.tsx"), "export function App(){return <><img src='x'/><input/><div className='rounded-xl shadow-lg'/></>}");
       const result = auditProject(analyzeProject(root));
-      expect(result.findings.some((finding) => finding.rule === "a11y.image-alt")).toBe(true);
+      expect(result.findings.some((finding) => finding.rule === "accessibility.image-alt")).toBe(true);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

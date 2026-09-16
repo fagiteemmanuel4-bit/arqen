@@ -6,5 +6,5 @@
   "bin": { "arqen": "dist/index.js" },
   "scripts": { "build": "tsc -p tsconfig.json" },
   "dependencies": { "@arqen/analyzer": "workspace:*", "@arqen/transform": "workspace:*", "@arqen/uiir": "workspace:*", "commander": "^14.0.0" },
-  "devDependencies": { "@types/node": "^24.3.1", "typescript": "^7.0.2" }
+  "devDependencies": { "@types/node": "^24.3.1", "typescript": "^5.9.2" }
 }

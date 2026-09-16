@@ -1,0 +1,6 @@
+:root { --surface: #fff; --ink: #111827; --space: 16px; --radius: 10px; }
+.app { min-height: 100vh; background: #f8fafc; color: #111827; }
+.header { display: flex; justify-content: space-between; padding: 24px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+.content { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; padding: 32px; }
+.panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+button { background: #2563eb; color: #fff; padding: 10px 14px; border-radius: 8px; }

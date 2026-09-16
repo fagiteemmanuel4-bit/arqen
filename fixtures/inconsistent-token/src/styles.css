@@ -1,0 +1,4 @@
+:root { --brand: #2563eb; --space-md: 16px; }
+.primary { background: #2563eb; color: #fff; padding: 16px; border-radius: 8px; }
+.secondary { background: #1d4ed8; color: #fff; padding: 18px; border-radius: 12px; }
+.panel { margin: 24px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,.2); }

@@ -21,7 +21,7 @@ program.command("init").argument("[directory]", "project directory", ".").option
 
 program.command("analyze").argument("[directory]", "project directory", ".").option("--json", "machine-readable output").action((directory, options) => {
   const project = analyzeProject(projectPath(directory)); const graph = analyzeProjectGraph(project);
-  const result = { name: project.name, framework: project.framework, language: project.language, packageManager: project.packageManager, styling: project.styling, files: project.files.length, entryPoints: project.entryPoints, routes: project.routes, components: project.components, designTokens: project.designSystem.tokens, graph };
+  const result = { name: project.name, framework: project.framework, language: project.language, packageManager: project.packageManager, styling: project.styling, files: project.files.length, entryPoints: project.entryPoints, routes: project.routes, components: project.components, designTokens: project.designSystem.tokens, repeatedValues: project.designSystem.repeatedValues, componentPatterns: project.designSystem.componentPatterns, graph };
   if (options.json) print(result, true); else {
     console.log(`\n${project.name} · ${project.framework}`); console.log(`  language        ${project.language}`); console.log(`  package manager ${project.packageManager}`); console.log(`  styling         ${project.styling}`);
     console.log(`  source files    ${project.files.length}`); console.log(`  routes          ${project.routes.length}`); console.log(`  components      ${project.components.length}`); console.log(`  design tokens   ${project.designSystem.tokens.length}`); console.log(`  graph nodes     ${graph.nodes.length}`);
@@ -33,20 +33,20 @@ program.command("audit").argument("[directory]", "project directory", ".").optio
   const result = auditProject(analyzeProject(projectPath(directory)));
   if (options.json) print(result, true); else {
     console.log(`\nARQEN design audit · ${result.score}/100`); console.log(`  critical ${result.summary.critical}  high ${result.summary.high}  medium ${result.summary.medium}  low ${result.summary.low}`);
-    for (const finding of result.findings) console.log(`\n[${finding.severity.toUpperCase()} · ${(finding.confidence * 100).toFixed(0)}% confidence] ${finding.title}\n  ${finding.evidence}\n  → ${finding.recommendation}`);
+    for (const finding of result.findings) console.log(`\n[${finding.severity.toUpperCase()} · ${finding.certainty} · ${(finding.confidence * 100).toFixed(0)}% confidence] ${finding.title}\n  ${finding.evidence}\n  → ${finding.recommendation}`);
   }
 });
 
 program.command("review").argument("[directory]", "project directory", ".").option("--json", "machine-readable output").action((directory, options) => {
   const root = projectPath(directory); let diff = "";
   try { diff = execFileSync("git", ["diff", "--unified=0", "HEAD", "--", "."], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { diff = ""; }
-  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].map((match) => match[2]).filter((file) => /\.(tsx|jsx|ts|js|css|scss|sass)$/.test(file));
+  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].map((match) => match[2]!).filter((file) => /\.(tsx|jsx|ts|js|css|scss|sass)$/.test(file));
   const project = analyzeProject(root); const audit = auditProject(project); const changed = new Set(changedFiles);
   const regressions = audit.findings.filter((finding) => finding.files.some((file) => changed.has(file)));
   const result = { kind: "design-review", changedFiles, changedUiFiles: changedFiles.filter((file) => /\.(tsx|jsx)$/.test(file)), regressions, audit: { score: audit.score, summary: audit.summary } };
   if (options.json) print(result, true); else {
     console.log(`\nARQEN REVIEW · ${changedFiles.length} changed UI/style files`); if (!regressions.length) console.log("No deterministic findings were attributable to changed files.");
-    for (const finding of regressions) console.log(`\n[${finding.severity.toUpperCase()}] ${finding.title}\n  ${finding.evidence}\n  Files: ${finding.files.join(", ")}\n  → ${finding.recommendation}`);
+    for (const finding of regressions) console.log(`\n[${finding.severity.toUpperCase()} · ${finding.certainty}] ${finding.title}\n  ${finding.evidence}\n  Files: ${finding.files.join(", ")}\n  → ${finding.recommendation}`);
   }
 });
 
@@ -57,11 +57,36 @@ program.command("fix").argument("[directory]", "project directory", ".").option(
 
 program.command("diff").argument("[directory]", "project directory", ".").option("--json", "machine-readable output").action((directory, options) => {
   const project = analyzeProject(projectPath(directory)); const plan = buildSafeAuditPlan(project, auditProject(project));
-  print(plan.edits.map((edit) => ({ path: edit.path, reason: edit.reason, risk: edit.risk, before: edit.before, after: edit.after })), options.json);
+  print(plan.edits.map((edit) => ({ path: edit.path, reason: edit.reason, expectedOutcome: edit.expectedOutcome, risk: edit.risk, confidence: edit.confidence, validationStrategy: edit.validationStrategy, before: edit.before, after: edit.after })), options.json);
 });
 
-program.command("validate").argument("file", "UIIR JSON file").option("--json", "machine-readable output").action((file, options) => {
-  const document = JSON.parse(fs.readFileSync(path.resolve(file), "utf8")); const issues = validateUIIR(document); print({ valid: isValidUIIR(document), issues }, options.json); if (issues.some((issue) => issue.severity === "error")) process.exitCode = 1;
+program.command("validate").argument("target", "UIIR JSON file or project directory").option("--json", "machine-readable output").action((target, options) => {
+  const resolved = projectPath(target);
+  if (fs.statSync(resolved).isFile()) {
+    const document = JSON.parse(fs.readFileSync(resolved, "utf8")); const issues = validateUIIR(document);
+    print({ kind: "uiir", valid: isValidUIIR(document), issues }, options.json);
+    if (issues.some((issue) => issue.severity === "error")) process.exitCode = 1;
+    return;
+  }
+  const project = analyzeProject(resolved);
+  const audit = auditProject(project);
+  const graph = analyzeProjectGraph(project);
+  const plan = buildSafeAuditPlan(project, audit);
+  const result = {
+    kind: "project-validation",
+    project: { name: project.name, framework: project.framework, files: project.files.length, components: project.components.length },
+    checks: {
+      parsed: project.files.length > 0,
+      graphBuilt: graph.nodes.length > 0 || project.files.length === 0,
+      auditCompleted: true,
+      transformationPlanValid: plan.edits.every((edit) => edit.path && edit.before !== edit.after && edit.validationStrategy.length > 0),
+      browser: "not-run",
+      accessibility: "static-only",
+    },
+    audit: { score: audit.score, summary: audit.summary, findings: audit.findings },
+  };
+  print(result, options.json);
+  if (!result.checks.parsed || !result.checks.graphBuilt || !result.checks.transformationPlanValid) process.exitCode = 1;
 });
 
 program.parse();
