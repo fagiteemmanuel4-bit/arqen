@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { docker, dockerOrThrow, dockerAvailable, ensureImage, removeContainer } from "./docker.js";
-import { detectPackageManager, installDependencies, killContainer } from "./install.js";
+import { dockerAvailable, dockerOrThrow, ensureImage, removeContainer } from "./docker.js";
+import { detectPackageManager, installDependencies } from "./install.js";
 import { attachServeNetwork, createSandboxNetworks, destroySandboxNetworks, disconnectNetwork } from "./network.js";
 import { startDevServer } from "./serve.js";
 import { DEFAULT_SANDBOX_OPTIONS, type SandboxFailure, type SandboxOptions, type SandboxResult } from "./types.js";
 
-function failure(phase: SandboxFailure["phase"], code: SandboxFailure["code"], message: string, extra: Partial<SandboxFailure> = {}): SandboxResult {
-  return { ok: false, error: { phase, code, message, ...extra } };
-}
+function failure(phase: SandboxFailure["phase"], code: SandboxFailure["code"], message: string, extra: Partial<SandboxFailure> = {}): SandboxResult { return { ok: false, error: { phase, code, message, ...extra } }; }
 
 function validateRepository(repoPath: string): string | SandboxFailure {
   try {
@@ -16,13 +14,10 @@ function validateRepository(repoPath: string): string | SandboxFailure {
     if (!fs.statSync(resolved).isDirectory()) return { phase: "preparing", code: "INVALID_REPOSITORY", message: "Sandbox target is not a directory." };
     if (!fs.existsSync(path.join(resolved, "package.json"))) return { phase: "preparing", code: "INVALID_REPOSITORY", message: "Sandbox target does not contain package.json." };
     return resolved;
-  } catch (error) {
-    return { phase: "preparing", code: "INVALID_REPOSITORY", message: error instanceof Error ? error.message : String(error) };
-  }
+  } catch (error) { return { phase: "preparing", code: "INVALID_REPOSITORY", message: error instanceof Error ? error.message : String(error) }; }
 }
 
 function safeId(): string { return `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
-
 function validateOptions(options: SandboxOptions): SandboxFailure | undefined {
   const port = options.port ?? DEFAULT_SANDBOX_OPTIONS.port;
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { phase: "preparing", code: "PORT_UNAVAILABLE", message: "Sandbox port must be an integer between 1024 and 65535." };
@@ -39,20 +34,13 @@ async function createContainer(repoPath: string, image: string, networks: Awaite
   const pids = options.resources?.pidsLimit ?? DEFAULT_SANDBOX_OPTIONS.resources.pidsLimit;
   const port = options.port ?? DEFAULT_SANDBOX_OPTIONS.port;
   const name = `arqen-sandbox-${id}`;
-  const containerId = await dockerOrThrow([
-    "create", "--name", name,
-    "--network", networks.installNetwork,
-    "--publish", `127.0.0.1::${port}`,
-    "--cpus", String(cpu),
-    "--memory", `${memory}m`,
-    "--pids-limit", String(pids),
-    "--cap-drop", "ALL",
-    "--security-opt", "no-new-privileges:true",
-    "--init",
-    image,
-  ], 30_000);
+  const containerId = await dockerOrThrow(["create", "--name", name, "--network", networks.installNetwork, "--publish", `127.0.0.1::${port}`, "--cpus", String(cpu), "--memory", `${memory}m`, "--pids-limit", String(pids), "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--init", image], 30_000);
   await dockerOrThrow(["cp", `${repoPath}/.`, `${containerId}:/workspace`], 120_000);
   return containerId;
+}
+
+async function prepareWorkspace(containerId: string): Promise<void> {
+  await dockerOrThrow(["exec", "-u", "0", containerId, "sh", "-c", "find /workspace -type d -name node_modules -prune -exec rm -rf {} +; chown -R 10001:10001 /workspace"], 120_000);
 }
 
 async function startContainer(containerId: string): Promise<void> { await dockerOrThrow(["start", containerId], 30_000); }
@@ -70,33 +58,20 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
   const id = safeId();
   let containerId: string | undefined;
   let networks: Awaited<ReturnType<typeof createSandboxNetworks>> | undefined;
-
-  const cleanup = async () => {
-    if (containerId) await stopAndRemove(containerId).catch(() => undefined);
-    if (networks) await destroySandboxNetworks(networks, containerId).catch(() => undefined);
-    containerId = undefined;
-    networks = undefined;
-  };
+  const cleanup = async () => { if (containerId) await stopAndRemove(containerId).catch(() => undefined); if (networks) await destroySandboxNetworks(networks, containerId).catch(() => undefined); containerId = undefined; networks = undefined; };
 
   try {
     await ensureImage(image, options.rebuildImage ?? false);
     networks = await createSandboxNetworks(id, image);
     containerId = await createContainer(validation, image, networks, options, id);
     await startContainer(containerId);
+    await prepareWorkspace(containerId);
 
     const installTimeout = options.timeouts?.installMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.installMs;
-    const installArgs = options.installArgs ?? (manager === "npm"
-      ? (fs.existsSync(path.join(validation, "package-lock.json")) ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"])
-      : ["install", "--frozen-lockfile", "--reporter", "append-only"]);
+    const installArgs = options.installArgs ?? (manager === "npm" ? (fs.existsSync(path.join(validation, "package-lock.json")) ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"]) : ["install", "--frozen-lockfile", "--reporter", "append-only"]);
     const install = await installDependencies(containerId, manager, installArgs, installTimeout);
-    if (install.timedOut) {
-      await cleanup();
-      return failure("installing", "INSTALL_TIMEOUT", `Dependency installation exceeded ${installTimeout}ms.`, { stdout: install.stdout, stderr: install.stderr });
-    }
-    if (install.code !== 0) {
-      await cleanup();
-      return failure("installing", "INSTALL_FAILED", "Dependency installation failed.", { exitCode: install.code, signal: install.signal ?? undefined, stdout: install.stdout, stderr: install.stderr });
-    }
+    if (install.timedOut) { await cleanup(); return failure("installing", "INSTALL_TIMEOUT", `Dependency installation exceeded ${installTimeout}ms.`, { stdout: install.stdout, stderr: install.stderr }); }
+    if (install.code !== 0) { await cleanup(); return failure("installing", "INSTALL_FAILED", "Dependency installation failed.", { exitCode: install.code, signal: install.signal ?? undefined, stdout: install.stdout, stderr: install.stderr }); }
 
     await attachServeNetwork(containerId, networks.serveNetwork);
     await disconnectNetwork(networks.installNetwork, containerId);
@@ -111,10 +86,7 @@ export async function runSandbox(repoPath: string, options: SandboxOptions = {})
       stopped = true;
       if (maxRuntimeTimer) clearTimeout(maxRuntimeTimer);
       await stopAndRemove(containerId!).catch(() => undefined);
-      if (networks) {
-        await destroySandboxNetworks(networks, containerId).catch(() => undefined);
-        networks = undefined;
-      }
+      if (networks) { await destroySandboxNetworks(networks, containerId).catch(() => undefined); networks = undefined; }
     };
     const maxRuntimeMs = options.timeouts?.maxRuntimeMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.maxRuntimeMs;
     if (maxRuntimeMs && maxRuntimeMs > 0) maxRuntimeTimer = setTimeout(() => { void stop(); }, maxRuntimeMs);
