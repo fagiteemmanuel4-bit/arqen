@@ -1,4 +1,4 @@
-import AjvModule, { type ErrorObject, type ValidateFunction } from "ajv";
+import Ajv2020Module, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -34,10 +34,7 @@ type AjvConstructor = new (options?: { allErrors?: boolean; strict?: boolean }) 
   compile<T = unknown>(schema: UIIRSchema): ValidateFunction<T>;
 };
 
-// Ajv 8 exposes a default constructor at runtime, while the repository's
-// TypeScript/module settings do not model that CommonJS/ESM interop reliably.
-// Keep the runtime import and the compile-time contract explicit at this boundary.
-const Ajv = AjvModule as unknown as AjvConstructor;
+const Ajv = Ajv2020Module as unknown as AjvConstructor;
 const schema = JSON.parse(readFileSync(fileURLToPath(new URL("../schema/uiir-0.2.0.schema.json", import.meta.url)), "utf8")) as UIIRSchema;
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validateSchema = ajv.compile<UIIR>(schema);
