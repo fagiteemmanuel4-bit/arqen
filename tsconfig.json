@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/uiir" },
+    { "path": "packages/analyzer" },
+    { "path": "packages/transform" },
+    { "path": "packages/browser" },
+    { "path": "packages/sandbox" },
+    { "path": "apps/cli" }
+  ]
+}
