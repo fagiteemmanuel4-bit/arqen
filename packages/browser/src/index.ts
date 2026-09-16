@@ -37,17 +37,17 @@ function assertLocalServerTarget(target: string): string {
 
 export async function inspectServer(options: BrowserServerInspectionOptions): Promise<BrowserInspectionReport> {
   const target = assertLocalServerTarget(options.target);
+  const allowedOrigin = new URL(target).origin;
   const outputDir = path.resolve(options.outputDir); fs.mkdirSync(outputDir, { recursive: true });
   const viewports = { ...DEFAULT_VIEWPORTS, ...(options.viewports ?? {}) } as Record<BrowserViewportName, { width: number; height: number }>;
   const browser = await chromium.launch({ headless: true });
   try {
     const evidence: VisualEvidence[] = [];
     for (const name of ["desktop", "tablet", "mobile"] as BrowserViewportName[]) {
-      const context = await browser.newContext({ viewport: viewports[name], javaScriptEnabled: true });
+      const context = await browser.newContext({ viewport: viewports[name], javaScriptEnabled: true, serviceWorkers: "block" });
       await context.route("**/*", async (route) => {
         const requestUrl = new URL(route.request().url());
-        const hostname = requestUrl.hostname.toLowerCase();
-        if ((requestUrl.protocol === "http:" || requestUrl.protocol === "https:") && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1")) return route.continue();
+        if ((requestUrl.protocol === "http:" || requestUrl.protocol === "https:") && requestUrl.origin === allowedOrigin) return route.continue();
         return route.abort();
       });
       const page = await context.newPage();
