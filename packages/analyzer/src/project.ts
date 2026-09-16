@@ -58,13 +58,16 @@ function detectStyling(root: string, sourceFiles: string[]): Project["styling"] 
 }
 
 function isComponentName(name: string): boolean { return /^[A-Z]/.test(name); }
-function hasExportModifier(node: ts.Node): boolean { return node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false; }
+function hasExportModifier(node: ts.Node): boolean {
+  if (!ts.canHaveModifiers(node)) return false;
+  return ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+}
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node;
   while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) current = current.expression;
   return current;
 }
-function isFunctionLike(node: ts.Expression): boolean { return ts.isArrowFunction(node) || ts.isFunctionExpression(node); }
+function isFunctionLike(node: ts.Expression): node is ts.ArrowFunction | ts.FunctionExpression { return ts.isArrowFunction(node) || ts.isFunctionExpression(node); }
 
 function jsxElementsFor(node: ts.Node, source: ts.SourceFile): string[] {
   const elements: string[] = [];
