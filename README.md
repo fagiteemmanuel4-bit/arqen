@@ -20,11 +20,45 @@ The current foundation can:
 - expose a model-provider abstraction for OpenRouter, OpenAI, Anthropic, Gemini and local OpenAI-compatible endpoints
 - provide CLI commands for `init`, `analyze`, `audit`, `review`, `fix`, `diff` and `validate`, with JSON output where appropriate
 - inspect safe local static fixtures in Chromium at desktop, tablet and mobile viewports, producing screenshots, dimensions, overflow measurements, ARIA snapshots, axe accessibility results, console errors and failed-request evidence
+- safely stage arbitrary Node repositories inside a non-root Docker sandbox with CPU, memory, PID and wall-clock limits
+- install dependencies through an explicit registry-only egress proxy, then disconnect external installation networking before the dev server starts
+- start a dev server behind a localhost-only published port and return a structured runtime handle for cleanup
+- inspect sandboxed HTTP applications with the browser evidence pipeline while restricting browser requests to the exact localhost origin
 - maintain a regression fixture suite, including a realistic `movie-site-fixture`
+
+## Sandbox security boundary
+
+The sandbox is intentionally separate from `packages/browser`. `@arqen/sandbox` owns untrusted repository execution; `@arqen/browser` owns browser evidence.
+
+The execution lifecycle is:
+
+```text
+repository
+   ↓
+Docker image / non-root container
+   ↓
+registry-only install network
+   ↓
+deterministic dependency installation
+   ↓
+install network disconnected
+   ↓
+isolated localhost serve network
+   ↓
+http://127.0.0.1:<ephemeral-port>
+   ↓
+@arqen/browser inspectServer()
+   ↓
+container + networks destroyed
+```
+
+The sandbox does not inherit the host environment. Provider credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` and `OPENROUTER_API_KEY` are never copied into the sandbox environment. The default registry policy allows only `registry.npmjs.org` during installation; projects requiring another registry must be explicitly supported by a future policy extension rather than silently receiving unrestricted network access.
+
+Docker provides the process boundary used by this local developer workflow. It should not be described as VM-grade isolation for hostile multi-tenant workloads; a future stronger execution backend can replace it without changing the browser contract.
 
 ## What is deliberately not claimed
 
-ARQEN does not yet safely build and start arbitrary repositories inside a process sandbox. The browser layer currently accepts only explicitly allowed local `file://` fixtures and blocks non-file browser requests. It does not execute repository scripts or model-generated shell commands.
+ARQEN does not claim that every arbitrary repository will install or start successfully. Projects can fail because of unsupported package managers, custom registries, missing native/system dependencies, incompatible Node versions, or application-specific startup requirements. Those failures are surfaced as structured sandbox failures rather than executed directly on the host.
 
 ARQEN is not yet a production visual-regression or autonomous remediation system. Browser evidence is real, but visual quality scoring and autonomous browser-driven fixes are intentionally not fabricated.
 
@@ -49,6 +83,8 @@ DIFF / APPROVAL
        ↓
 VALIDATE
        ↓
+SANDBOX → BROWSER EVIDENCE
+       ↓
 REPORT / evidence
 ```
 
@@ -67,6 +103,7 @@ packages/
   uiir/                   # versioned UI Intermediate Representation + shared JSON Schema
   analyzer/               # source analysis + deterministic audit rules
   browser/                # bounded Playwright/axe evidence capture
+  sandbox/                # Docker execution boundary for arbitrary repositories
   transform/              # bounded transformation plans
 services/
   orchestrator/           # model provider routing + validated structured design endpoint
@@ -101,4 +138,4 @@ See `services/orchestrator/.env.example`, `docs/security.md` and `docs/visual-in
 
 ## Status
 
-ARQEN is early developer infrastructure. The current release establishes stronger project analysis, shared UIIR validation, deterministic audit evidence, fixture regression coverage, bounded transformations and real browser evidence for safe static fixtures. The next security boundary is a sandboxed project build/start capability; until that exists, ARQEN will not pretend arbitrary repositories are runnable.
+ARQEN is early developer infrastructure. The current branch establishes stronger project analysis, shared UIIR validation, deterministic audit evidence, bounded transformations, real browser evidence for safe static fixtures, and the first Docker sandbox boundary for arbitrary repository install/start workflows. The sandbox is intentionally conservative: unsupported external registries and dependencies fail closed rather than receiving unrestricted network access.
