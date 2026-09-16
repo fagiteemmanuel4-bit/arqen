@@ -40,7 +40,7 @@ program.command("audit").argument("[directory]", "project directory", ".").optio
 program.command("review").argument("[directory]", "project directory", ".").option("--json", "machine-readable output").action((directory, options) => {
   const root = projectPath(directory); let diff = "";
   try { diff = execFileSync("git", ["diff", "--unified=0", "HEAD", "--", "."], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { diff = ""; }
-  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].map((match) => match[2]).filter((file) => /\.(tsx|jsx|ts|js|css|scss|sass)$/.test(file));
+  const changedFiles = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].map((match) => match[2]!).filter((file) => /\.(tsx|jsx|ts|js|css|scss|sass)$/.test(file));
   const project = analyzeProject(root); const audit = auditProject(project); const changed = new Set(changedFiles);
   const regressions = audit.findings.filter((finding) => finding.files.some((file) => changed.has(file)));
   const result = { kind: "design-review", changedFiles, changedUiFiles: changedFiles.filter((file) => /\.(tsx|jsx)$/.test(file)), regressions, audit: { score: audit.score, summary: audit.summary } };
