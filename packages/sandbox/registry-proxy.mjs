@@ -4,40 +4,32 @@ import net from "node:net";
 const allowedHosts = new Set(["registry.npmjs.org"]);
 const port = 3128;
 
-function allowed(hostname) {
-  return allowedHosts.has(hostname.toLowerCase().replace(/\.$/, ""));
-}
-
-function reject(socket, status = 403, message = "Host is not allowed by the sandbox registry policy.") {
-  socket.write(`HTTP/1.1 ${status} Forbidden\\r\\nConnection: close\\r\\nContent-Length: ${Buffer.byteLength(message)}\\r\\n\\r\\n${message}`);
-  socket.destroy();
-}
+function allowed(hostname) { return allowedHosts.has(hostname.toLowerCase().replace(/\.$/, "")); }
 
 const server = http.createServer((request, response) => {
-  let url;
-  try { url = new URL(request.url ?? "", request.headers.host ? `http://${request.headers.host}` : undefined); }
-  catch { response.writeHead(400); response.end("Bad proxy request"); return; }
-  if (!allowed(url.hostname)) { response.writeHead(403); response.end("Registry host is not allowed"); return; }
-  const target = net.connect(url.port ? Number(url.port) : 80, url.hostname);
-  target.on("connect", () => {
-    const headers = { ...request.headers };
-    delete headers["proxy-connection"];
-    const upstream = http.request({ hostname: url.hostname, port: url.port ? Number(url.port) : 80, path: `${url.pathname}${url.search}`, method: request.method, headers }, (upstreamResponse) => {
-      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
-      upstreamResponse.pipe(response);
-    });
-    upstream.on("error", () => { if (!response.headersSent) response.writeHead(502); response.end(); });
-    request.pipe(upstream);
+  let target;
+  try { target = new URL(request.url ?? ""); } catch { response.writeHead(400); response.end("Bad proxy request"); return; }
+  if (target.protocol !== "http:" || !allowed(target.hostname)) { response.writeHead(403); response.end("Registry host is not allowed"); return; }
+  const headers = { ...request.headers };
+  delete headers["proxy-connection"];
+  const upstream = http.request({ hostname: target.hostname, port: Number(target.port || 80), path: `${target.pathname}${target.search}`, method: request.method, headers }, (upstreamResponse) => {
+    response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+    upstreamResponse.pipe(response);
   });
-  target.on("error", () => { if (!response.headersSent) response.writeHead(502); response.end(); });
+  upstream.on("error", () => { if (!response.headersSent) response.writeHead(502); response.end(); });
+  request.pipe(upstream);
 });
 
 server.on("connect", (request, clientSocket, head) => {
   const [hostname, rawPort] = (request.url ?? "").split(":");
   const targetPort = Number(rawPort || 443);
-  if (!hostname || !allowed(hostname) || targetPort !== 443) return reject(clientSocket);
+  if (!hostname || !allowed(hostname) || targetPort !== 443) {
+    clientSocket.write(`HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n`);
+    clientSocket.destroy();
+    return;
+  }
   const upstream = net.connect(targetPort, hostname, () => {
-    clientSocket.write("HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: ARQEN-Registry-Proxy\\r\\n\\r\\n");
+    clientSocket.write(`HTTP/1.1 200 Connection Established\r\nProxy-Agent: ARQEN-Registry-Proxy\r\n\r\n`);
     if (head.length) upstream.write(head);
     clientSocket.pipe(upstream);
     upstream.pipe(clientSocket);
