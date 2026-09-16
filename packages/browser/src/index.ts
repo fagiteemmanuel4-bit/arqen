@@ -5,6 +5,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 export const DEFAULT_VIEWPORTS = { desktop: { width: 1440, height: 900 }, tablet: { width: 1024, height: 768 }, mobile: { width: 390, height: 844 } } as const;
 export type BrowserViewportName = keyof typeof DEFAULT_VIEWPORTS;
 export interface BrowserInspectionOptions { target: string; allowedRoot: string; outputDir: string; viewports?: Partial<Record<BrowserViewportName, { width: number; height: number }>>; timeoutMs?: number; }
+export interface BrowserServerInspectionOptions extends Omit<BrowserInspectionOptions, "target" | "allowedRoot"> { target: string; }
 export interface VisualEvidence { viewport: { name: BrowserViewportName; width: number; height: number }; screenshot: string; dimensions: { viewportWidth: number; viewportHeight: number; documentWidth: number; documentHeight: number }; overflow: { horizontal: boolean; scrollWidth: number; clientWidth: number }; layoutMeasurements: Array<{ selector: string; tag: string; x: number; y: number; width: number; height: number; visible: boolean }>; accessibility: { ariaSnapshot: unknown; violations: Array<{ id: string; impact: string | null; description: string; helpUrl?: string; nodes: number }> }; consoleErrors: string[]; failedRequests: Array<{ url: string; method: string; failure?: string }>; }
 export interface BrowserInspectionReport { target: string; evidence: VisualEvidence[]; }
 function resolveAllowedRoot(allowedRoot: string): string { return fs.realpathSync(path.resolve(allowedRoot)); }
@@ -24,4 +25,35 @@ export async function inspectLocalFixture(options: BrowserInspectionOptions): Pr
   const allowedRoot = resolveAllowedRoot(options.allowedRoot); const target = resolveTarget(options.target, allowedRoot); const outputDir = path.resolve(options.outputDir); fs.mkdirSync(outputDir, { recursive: true }); const viewports = { ...DEFAULT_VIEWPORTS, ...(options.viewports ?? {}) } as Record<BrowserViewportName, { width: number; height: number }>;
   const browser = await chromium.launch({ headless: true });
   try { const evidence: VisualEvidence[] = []; for (const name of ["desktop", "tablet", "mobile"] as BrowserViewportName[]) { const context = await browser.newContext({ viewport: viewports[name], javaScriptEnabled: true }); await context.route("**/*", async (route) => { const requestUrl = new URL(route.request().url()); if (requestUrl.protocol !== "file:") return route.abort(); try { const requestPath = fs.realpathSync(decodeURIComponent(requestUrl.pathname)); assertInsideRoot(requestPath, allowedRoot); const body = fs.readFileSync(requestPath); return route.fulfill({ status: 200, contentType: contentType(requestPath), body }); } catch { return route.abort(); } }); const page = await context.newPage(); evidence.push(await inspectPage(page, target, name, viewports[name], outputDir, options.timeoutMs ?? 15000)); await context.close(); } return { target, evidence }; } finally { await browser.close(); }
+}
+
+function assertLocalServerTarget(target: string): string {
+  const url = new URL(target);
+  if (!(url.protocol === "http:" || url.protocol === "https:")) throw new Error("Server inspection only permits http:// or https:// localhost targets.");
+  const hostname = url.hostname.toLowerCase();
+  if (!(hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1")) throw new Error("Server inspection only permits localhost targets.");
+  return url.toString();
+}
+
+export async function inspectServer(options: BrowserServerInspectionOptions): Promise<BrowserInspectionReport> {
+  const target = assertLocalServerTarget(options.target);
+  const allowedOrigin = new URL(target).origin;
+  const outputDir = path.resolve(options.outputDir); fs.mkdirSync(outputDir, { recursive: true });
+  const viewports = { ...DEFAULT_VIEWPORTS, ...(options.viewports ?? {}) } as Record<BrowserViewportName, { width: number; height: number }>;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const evidence: VisualEvidence[] = [];
+    for (const name of ["desktop", "tablet", "mobile"] as BrowserViewportName[]) {
+      const context = await browser.newContext({ viewport: viewports[name], javaScriptEnabled: true, serviceWorkers: "block" });
+      await context.route("**/*", async (route) => {
+        const requestUrl = new URL(route.request().url());
+        if ((requestUrl.protocol === "http:" || requestUrl.protocol === "https:") && requestUrl.origin === allowedOrigin) return route.continue();
+        return route.abort();
+      });
+      const page = await context.newPage();
+      evidence.push(await inspectPage(page, target, name, viewports[name], outputDir, options.timeoutMs ?? 15000));
+      await context.close();
+    }
+    return { target, evidence };
+  } finally { await browser.close(); }
 }

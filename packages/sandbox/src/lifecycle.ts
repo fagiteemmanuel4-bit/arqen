@@ -1,0 +1,88 @@
+import fs from "node:fs";
+import path from "node:path";
+import { dockerAvailable, dockerOrThrow, ensureImage, removeContainer } from "./docker.js";
+import { buildInstallArgs, detectPackageManager, installDependencies } from "./install.js";
+import { attachServeNetwork, createSandboxNetworks, destroySandboxNetworks, disconnectNetwork } from "./network.js";
+import { startDevServer } from "./serve.js";
+import { DEFAULT_SANDBOX_OPTIONS, type SandboxFailure, type SandboxOptions, type SandboxResult } from "./types.js";
+
+function failure(phase: SandboxFailure["phase"], code: SandboxFailure["code"], message: string, extra: Partial<SandboxFailure> = {}): SandboxResult { return { ok: false, error: { phase, code, message, ...extra } }; }
+function validateRepository(repoPath: string): string | SandboxFailure {
+  try {
+    const resolved = fs.realpathSync(path.resolve(repoPath));
+    if (!fs.statSync(resolved).isDirectory()) return { phase: "preparing", code: "INVALID_REPOSITORY", message: "Sandbox target is not a directory." };
+    if (!fs.existsSync(path.join(resolved, "package.json"))) return { phase: "preparing", code: "INVALID_REPOSITORY", message: "Sandbox target does not contain package.json." };
+    return resolved;
+  } catch (error) { return { phase: "preparing", code: "INVALID_REPOSITORY", message: error instanceof Error ? error.message : String(error) }; }
+}
+function safeId(): string { return `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+function validateOptions(options: SandboxOptions): SandboxFailure | undefined {
+  const port = options.port ?? DEFAULT_SANDBOX_OPTIONS.port;
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return { phase: "preparing", code: "PORT_UNAVAILABLE", message: "Sandbox port must be an integer between 1024 and 65535." };
+  const cpu = options.resources?.cpuCount ?? DEFAULT_SANDBOX_OPTIONS.resources.cpuCount;
+  const memory = options.resources?.memoryMb ?? DEFAULT_SANDBOX_OPTIONS.resources.memoryMb;
+  const pids = options.resources?.pidsLimit ?? DEFAULT_SANDBOX_OPTIONS.resources.pidsLimit;
+  if (cpu <= 0 || memory <= 0 || pids <= 0) return { phase: "preparing", code: "UNKNOWN", message: "CPU, memory and PID limits must be positive." };
+  return undefined;
+}
+async function createContainer(repoPath: string, image: string, networks: Awaited<ReturnType<typeof createSandboxNetworks>>, options: SandboxOptions, id: string): Promise<string> {
+  const cpu = options.resources?.cpuCount ?? DEFAULT_SANDBOX_OPTIONS.resources.cpuCount;
+  const memory = options.resources?.memoryMb ?? DEFAULT_SANDBOX_OPTIONS.resources.memoryMb;
+  const pids = options.resources?.pidsLimit ?? DEFAULT_SANDBOX_OPTIONS.resources.pidsLimit;
+  const port = options.port ?? DEFAULT_SANDBOX_OPTIONS.port;
+  const name = `arqen-sandbox-${id}`;
+  const containerId = await dockerOrThrow(["create", "--name", name, "--network", networks.installNetwork, "--publish", `127.0.0.1::${port}`, "--cpus", String(cpu), "--memory", `${memory}m`, "--pids-limit", String(pids), "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--init", image], 30_000);
+  await dockerOrThrow(["cp", `${repoPath}/.`, `${containerId}:/workspace`], 120_000);
+  return containerId;
+}
+async function prepareWorkspace(containerId: string): Promise<void> { await dockerOrThrow(["exec", "-u", "0", containerId, "sh", "-c", "find /workspace -type d -name node_modules -prune -exec rm -rf {} +; chown -R 10001:10001 /workspace"], 120_000); }
+async function startContainer(containerId: string): Promise<void> { await dockerOrThrow(["start", containerId], 30_000); }
+async function stopAndRemove(containerId: string): Promise<void> { await removeContainer(containerId); }
+
+export async function runSandbox(repoPath: string, options: SandboxOptions = {}): Promise<SandboxResult> {
+  const validation = validateRepository(repoPath);
+  if (typeof validation !== "string") return { ok: false, error: validation };
+  const optionError = validateOptions(options);
+  if (optionError) return { ok: false, error: optionError };
+  if (!(await dockerAvailable())) return failure("preparing", "DOCKER_UNAVAILABLE", "Docker Engine is unavailable. Start Docker and retry.");
+  const manager = options.packageManager ?? detectPackageManager(validation);
+  const image = options.image ?? "arqen-sandbox:0.1.0";
+  const id = safeId();
+  let containerId: string | undefined;
+  let networks: Awaited<ReturnType<typeof createSandboxNetworks>> | undefined;
+  const cleanup = async () => { if (containerId) await stopAndRemove(containerId).catch(() => undefined); if (networks) await destroySandboxNetworks(networks, containerId).catch(() => undefined); containerId = undefined; networks = undefined; };
+
+  try {
+    await ensureImage(image, options.rebuildImage ?? false);
+    networks = await createSandboxNetworks(id, image);
+    containerId = await createContainer(validation, image, networks, options, id);
+    await startContainer(containerId);
+    await prepareWorkspace(containerId);
+
+    const installTimeout = options.timeouts?.installMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.installMs;
+    const hasLockfile = fs.existsSync(path.join(validation, "pnpm-lock.yaml")) || fs.existsSync(path.join(validation, "package-lock.json")) || fs.existsSync(path.join(validation, "npm-shrinkwrap.json"));
+    const installArgs = buildInstallArgs(manager, hasLockfile, options.installArgs);
+    const install = await installDependencies(containerId, manager, installArgs, installTimeout);
+    if (install.timedOut) { await cleanup(); return failure("installing", "INSTALL_TIMEOUT", `Dependency installation exceeded ${installTimeout}ms.`, { stdout: install.stdout, stderr: install.stderr }); }
+    if (install.code !== 0) { await cleanup(); return failure("installing", "INSTALL_FAILED", "Dependency installation failed.", { exitCode: install.code, signal: install.signal ?? undefined, stdout: install.stdout, stderr: install.stderr }); }
+
+    await attachServeNetwork(containerId, networks.serveNetwork);
+    await disconnectNetwork(networks.installNetwork, containerId);
+    await removeContainer(networks.proxyContainer);
+
+    const startupMs = options.timeouts?.startupMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.startupMs;
+    const served = await startDevServer(containerId, options.port ?? DEFAULT_SANDBOX_OPTIONS.port, manager, options.serveCommand, options.serveArgs, startupMs);
+    let stopped = false;
+    let maxRuntimeTimer: NodeJS.Timeout | undefined;
+    const stop = async () => { if (stopped) return; stopped = true; if (maxRuntimeTimer) clearTimeout(maxRuntimeTimer); await stopAndRemove(containerId!).catch(() => undefined); if (networks) { await destroySandboxNetworks(networks, containerId).catch(() => undefined); networks = undefined; } };
+    const maxRuntimeMs = options.timeouts?.maxRuntimeMs ?? DEFAULT_SANDBOX_OPTIONS.timeouts.maxRuntimeMs;
+    if (maxRuntimeMs && maxRuntimeMs > 0) maxRuntimeTimer = setTimeout(() => { void stop(); }, maxRuntimeMs);
+    return { ok: true, runtime: { containerId, containerPort: options.port ?? DEFAULT_SANDBOX_OPTIONS.port, hostPort: served.hostPort, url: served.url, phase: "ready", stop } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await cleanup();
+    const lower = message.toLowerCase();
+    const code: SandboxFailure["code"] = lower.includes("image") ? "IMAGE_BUILD_FAILED" : lower.includes("http-ready") || lower.includes("published port") ? "SERVE_TIMEOUT" : lower.includes("development server") ? "SERVE_FAILED" : "UNKNOWN";
+    return failure("failed", code, message);
+  }
+}
