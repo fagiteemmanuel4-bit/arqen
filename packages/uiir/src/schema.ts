@@ -1,17 +1,8 @@
 import Ajv2020Module, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-
 export const UIIR_VERSION = "0.2.0" as const;
-
-export type UIIR = {
-  version: typeof UIIR_VERSION;
-  project: UIIRProject;
-  product: ProductSpec;
-  designSystem: UIDesignSystem;
-  screens: ScreenSpec[];
-};
-
+export type UIIR = { version: typeof UIIR_VERSION; project: UIIRProject; product: ProductSpec; designSystem: UIDesignSystem; screens: ScreenSpec[] };
 export type UIIRProject = { name: string; framework: "react" | "nextjs" | "vite-react" | "unknown"; sourceRoot?: string };
 export type ProductSpec = { name: string; purpose: string; audience: string[] };
 export type UIDesignSystem = { id: string; tokens: Record<string, { value: string; category: "color" | "spacing" | "typography" | "radius" | "shadow" | "breakpoint" | "other" }> };
@@ -26,37 +17,17 @@ export type ResponsiveSpec = { breakpoint: "mobile" | "tablet" | "desktop"; beha
 export type ComponentState = "default" | "loading" | "empty" | "error" | "disabled" | "success";
 export type InteractionSpec = { kind: "click" | "submit" | "change" | "focus" | "hover" | "navigation"; target?: string; action?: string };
 export type AccessibilitySpec = { name?: string; role?: string; keyboard?: boolean; labelled?: boolean; described?: boolean };
-
 export type UIIRValidationIssue = { path: string; message: string; severity: "error" | "warning" };
-
 type UIIRSchema = Record<string, unknown>;
-type AjvConstructor = new (options?: { allErrors?: boolean; strict?: boolean }) => {
-  compile<T = unknown>(schema: UIIRSchema): ValidateFunction<T>;
-};
-
+type AjvConstructor = new (options?: { allErrors?: boolean; strict?: boolean }) => { compile<T = unknown>(schema: UIIRSchema): ValidateFunction<T> };
 const Ajv = Ajv2020Module as unknown as AjvConstructor;
 const schema = JSON.parse(readFileSync(fileURLToPath(new URL("../schema/uiir-0.2.0.schema.json", import.meta.url)), "utf8")) as UIIRSchema;
 const ajv = new Ajv({ allErrors: true, strict: true });
 const validateSchema = ajv.compile<UIIR>(schema);
-
 export function validateUIIR(document: unknown): UIIRValidationIssue[] {
-  if (!validateSchema(document)) {
-    return (validateSchema.errors ?? []).map((error: ErrorObject) => ({
-      path: error.instancePath || "$",
-      message: error.message ?? "UIIR schema validation failed",
-      severity: "error" as const,
-    }));
-  }
-  const value = document as UIIR;
-  const issues: UIIRValidationIssue[] = [];
-  const ids = new Set<string>();
-  for (const [index, screen] of value.screens.entries()) {
-    if (ids.has(screen.id)) issues.push({ path: `/screens/${index}/id`, message: `Duplicate screen id: ${screen.id}`, severity: "error" });
-    ids.add(screen.id);
-  }
+  if (!validateSchema(document)) return (validateSchema.errors ?? []).map((error: ErrorObject) => { const params = error.params as { missingProperty?: string }; const path = error.instancePath || (error.keyword === "required" && params.missingProperty ? `/${params.missingProperty}` : "$"); return { path, message: error.message ?? "UIIR schema validation failed", severity: "error" as const }; });
+  const value = document as UIIR; const issues: UIIRValidationIssue[] = []; const ids = new Set<string>();
+  for (const [index, screen] of value.screens.entries()) { if (ids.has(screen.id)) issues.push({ path: `/screens/${index}/id`, message: `Duplicate screen id: ${screen.id}`, severity: "error" }); ids.add(screen.id); }
   return issues;
 }
-
-export function isValidUIIR(document: unknown): document is UIIR {
-  return validateUIIR(document).every((issue) => issue.severity !== "error");
-}
+export function isValidUIIR(document: unknown): document is UIIR { return validateUIIR(document).every((issue) => issue.severity !== "error"); }
