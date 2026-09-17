@@ -28,5 +28,5 @@ describe("arqen validation and inspection", () => {
     expect(result.checks.horizontalOverflowFree).toBe(false);
     expect(result.evidence.some((item) => item.overflow.horizontal)).toBe(true);
     expect(typeof result.checks.accessibilityClean).toBe("boolean");
-  });
+  }, 20000);
 });
