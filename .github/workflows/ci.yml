@@ -16,7 +16,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.12.0
-          cache: pnpm
       # The repository currently has no committed lockfile. Generate it in CI,
       # then make the actual install frozen so dependency resolution cannot
       # change between install and build/test/typecheck.
