@@ -26,3 +26,5 @@ Each runtime pass records screenshots, document dimensions, horizontal overflow,
 Every inspection command accepts `--json` for agent integrations. Errors use a stable code/message/details/suggestion envelope in JSON mode.
 
 The CLI deliberately does not expose a general `run`, `exec` or `generate-app` command. ARQEN is an interface intelligence tool, not a general coding agent.
+
+<!-- usability-pass-verified -->
