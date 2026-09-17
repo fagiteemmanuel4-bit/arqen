@@ -27,4 +27,4 @@ Every inspection command accepts `--json` for agent integrations. Errors use a s
 
 The CLI deliberately does not expose a general `run`, `exec` or `generate-app` command. ARQEN is an interface intelligence tool, not a general coding agent.
 
-<!-- usability-pass-verified -->
+<!-- usability-pass-verified-v2 -->
