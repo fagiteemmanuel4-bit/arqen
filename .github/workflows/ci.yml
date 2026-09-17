@@ -20,9 +20,7 @@ jobs:
       - run: pnpm --version
       - run: pnpm install --lockfile-only
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @arqen/browser exec playwright install --with-deps chromium
-      # Build first so workspace package exports have their generated .d.ts
-      # files available to the root TypeScript project-reference check.
+      - run: pnpm --filter @arqen/browser exec playwright install chromium
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
