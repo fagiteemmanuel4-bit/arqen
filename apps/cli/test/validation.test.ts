@@ -15,17 +15,18 @@ describe("arqen validation and inspection", () => {
     expect(result.checks.accessibility).toBe("not-run");
   });
 
-  it("captures desktop, tablet and mobile evidence from the movie fixture", () => {
+  it("captures all required viewports and detects the fixture's intentional overflow defect", () => {
     const output = execFileSync(process.execPath, [cli, "inspect", fixture, "--json"], { encoding: "utf8" });
     const result = JSON.parse(output) as {
       kind: string;
       checks: { allViewportsLoaded: boolean; horizontalOverflowFree: boolean; accessibilityClean: boolean };
-      evidence: Array<{ viewport: { name: string } }>;
+      evidence: Array<{ viewport: { name: string }; overflow: { horizontal: boolean } }>;
     };
     expect(result.kind).toBe("runtime-inspection");
     expect(result.evidence.map((item) => item.viewport.name)).toEqual(["desktop", "tablet", "mobile"]);
     expect(result.checks.allViewportsLoaded).toBe(true);
-    expect(result.checks.horizontalOverflowFree).toBe(true);
+    expect(result.checks.horizontalOverflowFree).toBe(false);
+    expect(result.evidence.some((item) => item.overflow.horizontal)).toBe(true);
     expect(typeof result.checks.accessibilityClean).toBe("boolean");
   });
 });
