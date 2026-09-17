@@ -13,12 +13,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.12.0
-      # The repository currently has no committed lockfile. Generate it in CI,
-      # then make the actual install frozen so dependency resolution cannot
-      # change between install and build/test/typecheck.
+      # GitHub-hosted runners provide a current Node 24 runtime, which satisfies
+      # the repository engine requirement (>=22.12.0). Avoid setup-node's cache
+      # lookup because the repository does not yet carry a committed lockfile.
+      # Generate the lockfile in CI, then make the actual install frozen.
+      - run: node --version
+      - run: pnpm --version
       - run: pnpm install --lockfile-only
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @arqen/browser exec playwright install --with-deps chromium
