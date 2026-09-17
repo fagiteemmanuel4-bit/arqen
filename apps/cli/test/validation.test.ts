@@ -16,7 +16,7 @@ describe("arqen validation and inspection", () => {
   });
 
   it("captures all required viewports and detects the fixture's intentional overflow defect", () => {
-    const output = execFileSync(process.execPath, [cli, "inspect", fixture, "--json"], { encoding: "utf8" });
+    const output = execFileSync(process.execPath, [cli, "inspect", fixture, "--json"], { encoding: "utf8", timeout: 15000 });
     const result = JSON.parse(output) as {
       kind: string;
       checks: { allViewportsLoaded: boolean; horizontalOverflowFree: boolean; accessibilityClean: boolean };
