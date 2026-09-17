@@ -13,17 +13,18 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
-      # GitHub-hosted runners provide a current Node 24 runtime, which satisfies
-      # the repository engine requirement (>=22.12.0). Avoid setup-node's cache
-      # lookup because the repository does not yet carry a committed lockfile.
-      # Generate the lockfile in CI, then make the actual install frozen.
+      # GitHub-hosted runners provide a current Node 22+ runtime, which satisfies
+      # the repository engine requirement (>=22.12.0). Generate a lockfile for
+      # this clean-room run, then make the actual install frozen.
       - run: node --version
       - run: pnpm --version
       - run: pnpm install --lockfile-only
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @arqen/browser exec playwright install --with-deps chromium
-      - run: pnpm typecheck
+      # Build first so workspace package exports have their generated .d.ts
+      # files available to the root TypeScript project-reference check.
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
       - uses: actions/setup-python@v5
         with:
